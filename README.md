@@ -1,5 +1,11 @@
 # Orch
 
+> A calmer home for your downloads, classes, deadlines, and projects.
+
+[![Orch study dashboard with focus mode, review queue, and activity feed](https://orch.spriteteam.com/assets/img/screenshots/study-home.webp)](https://orch.spriteteam.com/screenshots.html)
+
+[Get Orch for Windows](https://orch.spriteteam.com/downloads.html) | [See real screenshots](https://orch.spriteteam.com/screenshots.html) | [How it works](https://orch.spriteteam.com/how-it-works.html)
+
 Orch is a Windows app that keeps your files from getting lost in Downloads.
 
 You tell Orch what you are working on, choose where those files should live,
