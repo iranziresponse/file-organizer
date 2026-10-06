@@ -45,16 +45,16 @@
 
     <section class="connection-summary-grid" aria-label="Connection summary">
         <div class="connection-stat">
-            <strong>{{ connected_count }}/{{ total_count }}</strong>
+            <strong>{{ ready_count }}/{{ total_count }}</strong>
             <span>Ready</span>
         </div>
         <div class="connection-stat">
             <strong>{{ actionable_count }}</strong>
-            <span>Can add now</span>
+            <span>Needs action</span>
         </div>
         <div class="connection-stat">
             <strong>{{ blocked_count }}</strong>
-            <span>Not connected</span>
+            <span>Not ready</span>
         </div>
         <div class="connection-stat">
             <strong>{% if next_action %}{{ next_action.status_label }}{% else %}Clear{% endif %}</strong>

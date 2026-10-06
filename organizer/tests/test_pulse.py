@@ -7,6 +7,7 @@ criterion for the live dashboard work.
 """
 
 from datetime import time, timedelta
+from unittest import mock
 
 from django.urls import reverse
 from django.utils import timezone
@@ -45,6 +46,13 @@ class PulseSnapshotTests(SandboxedPathsTestCase):
 
         self.assertEqual(snap["sorting"]["state"], "resting")
         self.assertIn("Downloads", snap["sorting"]["label"])
+        self.assertFalse(snap["active"])
+
+    def test_snapshot_query_failure_is_marked_instead_of_looking_idle(self):
+        with mock.patch("organizer.core.pulse._sorting_badge", side_effect=RuntimeError("database unavailable")):
+            snap = pulse.get_snapshot(self.profile)
+
+        self.assertTrue(snap["pulse_error"])
         self.assertFalse(snap["active"])
 
     def test_sorting_badge_goes_active_with_a_large_folder_sort_task(self):
@@ -166,6 +174,16 @@ class PulseEndpointTests(SandboxedPathsTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["has_profile"])
 
+    def test_endpoint_marks_a_failed_activity_query_as_degraded(self):
+        self.make_profile()
+
+        with mock.patch("organizer.core.pulse._build_activity_stream", side_effect=RuntimeError("database unavailable")):
+            response = self.client.get(reverse("pulse_data"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["activity"], [])
+        self.assertTrue(response.json()["activity_error"])
+
 
 class ActivityStreamTests(SandboxedPathsTestCase):
     def setUp(self):
@@ -174,6 +192,13 @@ class ActivityStreamTests(SandboxedPathsTestCase):
 
     def test_empty_without_activity(self):
         self.assertEqual(pulse.get_activity_stream(self.profile), [])
+
+    def test_stream_query_failure_is_reported_separately_from_an_empty_stream(self):
+        with mock.patch("organizer.core.pulse._build_activity_stream", side_effect=RuntimeError("database unavailable")):
+            rows, failed = pulse.get_activity_stream_with_status(self.profile)
+
+        self.assertEqual(rows, [])
+        self.assertTrue(failed)
 
     def test_unions_and_orders_sources_newest_first(self):
         old = timezone.now() - timedelta(hours=5)

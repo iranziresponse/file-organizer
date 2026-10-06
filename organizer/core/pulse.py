@@ -11,11 +11,14 @@ animates or counts to imply activity that is not there.
 """
 
 from datetime import datetime, timedelta
+import logging
 
 from django.urls import reverse
 from django.utils import timezone
 
 from .status_bar import _short_timesince
+
+logger = logging.getLogger(__name__)
 
 # Show the "Deadline" badge only for something genuinely near.
 DEADLINE_HORIZON_DAYS = 14
@@ -207,6 +210,7 @@ def get_snapshot(profile):
         in_flight, in_flight_active = _in_flight_badge(profile)
         return {
             "has_profile": True,
+            "pulse_error": False,
             "active": bool(sorting_active or in_flight_active),
             "sorting": sorting,
             "in_flight": in_flight,
@@ -218,9 +222,8 @@ def get_snapshot(profile):
             "deadline": _deadline_badge(profile, now),
         }
     except Exception:
-        # Same principle as status_bar: a snapshot that can't be built
-        # should look like a quiet resting state, not break the page.
-        return {"has_profile": True, **_idle()}
+        logger.exception("Could not build dashboard pulse for profile %s.", profile.pk)
+        return {"has_profile": True, **_idle(), "pulse_error": True}
 
 
 # --- Activity film -----------------------------------------------------------
@@ -242,12 +245,22 @@ def get_activity_stream(profile, limit=30):
     select_related() on the profile/course FKs -- four related models in one
     view is exactly where an N+1 bites.
     """
+    return get_activity_stream_with_status(profile, limit)[0]
+
+
+def get_activity_stream_with_status(profile, limit=30):
+    """Return activity rows and whether the data query failed.
+
+    The dashboard can keep rendering if this query fails, but it must not
+    describe a failed read as an honestly empty activity history.
+    """
     if not profile:
-        return []
+        return [], False
     try:
-        return _build_activity_stream(profile, limit)
+        return _build_activity_stream(profile, limit), False
     except Exception:
-        return []
+        logger.exception("Could not load dashboard activity for profile %s.", profile.pk)
+        return [], True
 
 
 def _build_activity_stream(profile, limit):
@@ -337,7 +350,12 @@ def _build_activity_stream(profile, limit):
 def get_activity_stream_json(profile, limit=30):
     """get_activity_stream() with the datetime dropped, for the pulse
     endpoint's JSON payload."""
+    return get_activity_stream_json_with_status(profile, limit)[0]
+
+
+def get_activity_stream_json_with_status(profile, limit=30):
+    rows, failed = get_activity_stream_with_status(profile, limit)
     return [
         {k: v for k, v in row.items() if k != "when"}
-        for row in get_activity_stream(profile, limit)
-    ]
+        for row in rows
+    ], failed

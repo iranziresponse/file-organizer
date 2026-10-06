@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import string
 from collections import Counter
@@ -10,6 +11,7 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import DatabaseError, transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -71,6 +73,8 @@ from ..models import (
     TimetableDocument,
     TimetableEntry,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def drive_connect(request):
@@ -202,7 +206,7 @@ def _has_saved_timetable(connection):
 
 
 def _publishing_ready(channels):
-    return channels.filter(status__in=["connected", "configured"]).exists()
+    return channels.filter(status="connected").exists()
 
 
 def _publishing_needs_key(channels):
@@ -217,7 +221,7 @@ def connections_home(request):
     is the user's map: what is connected, what needs setup, what is optional,
     and why taking the next action is worth it.
     """
-    from ..core import ai_classify, drive_api, youtube_api
+    from ..core import ai_classify, diagnostics, drive_api, muele_api, youtube_api
 
     profile = Profile.get_active()
     profile_connections = (
@@ -233,17 +237,25 @@ def connections_home(request):
         return global_connections.filter(provider=provider).first()
 
     muele = connection("muele")
+    muele_token_available = bool(muele_api.load_connection_token(muele)) if muele else False
+    muele_needs_attention = bool(
+        muele and (
+            muele.status == "error"
+            or (muele.status == "connected" and not muele_token_available)
+        )
+    )
     timetable = connection("mak_timetable")
     timetable_entries = TimetableEntry.objects.filter(profile=profile).count() if profile else 0
-    muele_saved = bool(muele and (muele.status == "connected" or muele.username or muele.last_sync_at))
-    timetable_saved = _has_saved_timetable(timetable)
+    muele_saved = bool(muele and muele.status == "connected" and muele_token_available)
+    timetable_saved = bool(timetable and timetable.status == "connected")
+    timetable_configured = _has_saved_timetable(timetable)
     ai_config = ai_classify.load_ai_config() or {}
     youtube_config = youtube_api.load_youtube_config() or {}
     drive_config = drive_api.load_drive_config() or {}
     drive_connection = global_connection("drive")
     drive_email = drive_connection.config.get("email") if drive_connection and drive_connection.config else ""
     drive_ready = bool(drive_config.get("enabled") and drive_config.get("client_id") and drive_config.get("client_secret"))
-    drive_connected = bool(drive_ready and drive_api.is_connected())
+    drive_linked = bool(drive_ready and drive_api.is_connected())
 
     custom_channels = profile_connections.filter(provider="custom_website")
     github_channels = profile_connections.filter(provider="github")
@@ -259,11 +271,12 @@ def connections_home(request):
         _connection_card(
             title="Makerere MUELE",
             area="Learning files",
-            status="connected" if muele_saved else "setup" if has_profile and learning_profile else "not_connected" if has_profile else "blocked",
-            status_label="Connected" if muele_saved else "Set up" if has_profile and learning_profile else "Optional" if has_profile else "Needs profile",
+            status="connected" if muele_saved else "error" if muele_needs_attention else "setup" if has_profile and learning_profile else "not_connected" if has_profile else "blocked",
+            status_label="Connected" if muele_saved else "Needs attention" if muele_needs_attention else "Set up" if has_profile and learning_profile else "Optional" if has_profile else "Needs profile",
             detail=(
-                f"Connected as {muele.username}" if muele and muele.username
-                else f"Saved. Last sync {_short_timesince(muele.last_sync_at)}." if muele and muele.last_sync_at
+                f"Connected as {muele.username}" if muele_saved and muele.username
+                else f"Last successful sync {_short_timesince(muele.last_sync_at)}." if muele_saved and muele and muele.last_sync_at
+                else f"Connection needs attention; last successful sync {_short_timesince(muele.last_sync_at)}." if muele_needs_attention
                 else "Bring in course files, assignment dates, and learning activity when this profile needs it."
             ),
             reason="Useful for Makerere profiles. Other profiles can ignore it and still use Orch normally.",
@@ -274,11 +287,11 @@ def connections_home(request):
         _connection_card(
             title="Makerere Timetable",
             area="Schedule",
-            status="connected" if timetable_saved else "setup" if has_profile and learning_profile else "not_connected" if has_profile else "blocked",
-            status_label="Connected" if timetable_saved else "Set up" if has_profile and learning_profile else "Optional" if has_profile else "Needs profile",
-            detail=f"{timetable_entries} timetable entries synced." if timetable_entries else f"Saved for {timetable.config.get('group')}." if timetable_saved else "Add a timetable for classes, sessions, tests, exams, or training times.",
+            status="connected" if timetable_saved else "error" if timetable and timetable.status == "error" else "saved" if timetable_configured else "setup" if has_profile and learning_profile else "not_connected" if has_profile else "blocked",
+            status_label="Connected" if timetable_saved else "Needs attention" if timetable and timetable.status == "error" else "Saved · not verified" if timetable_configured else "Set up" if has_profile and learning_profile else "Optional" if has_profile else "Needs profile",
+            detail=f"{timetable_entries} timetable entries synced." if timetable_saved and timetable_entries else f"Timetable sync succeeded; no entries are currently listed. Last sync {_short_timesince(timetable.last_sync_at)}." if timetable_saved else f"Last sync failed for {timetable.config.get('group')}; retry to confirm the current timetable." if timetable and timetable.status == "error" and timetable_configured else f"Saved for {timetable.config.get('group')}; waiting for a successful sync." if timetable_configured else "Add a timetable for classes, sessions, tests, exams, or training times.",
             reason="Useful when this profile has time-based work. It should not be required for ordinary file sorting.",
-            action=_connection_action(reverse("timetable_view") if timetable_saved else reverse("timetable_connect") if has_profile else profile_setup_url, "View" if timetable_saved else "Set up" if has_profile else "Create profile"),
+            action=_connection_action(reverse("timetable_view") if timetable_saved else reverse("timetable_connect") if has_profile else profile_setup_url, "View" if timetable_saved else "Retry sync" if timetable_configured else "Set up" if has_profile else "Create profile"),
             meta=timetable.config.get("group", "") if timetable and timetable.config else "Timetable",
             scope=profile.name if profile else "No active profile",
         ),
@@ -310,9 +323,9 @@ def connections_home(request):
         _connection_card(
             title="Summaries and writing help",
             area="Writing",
-            status="connected" if ai_config.get("enabled") and ai_config.get("api_key") else "saved" if ai_config.get("api_key") else "setup",
-            status_label="Connected" if ai_config.get("enabled") and ai_config.get("api_key") else "Saved" if ai_config.get("api_key") else "Set up",
-            detail="Summaries and extra folder suggestions are ready." if ai_config.get("enabled") and ai_config.get("api_key") else "Access key saved. Turn it on when you want writing help." if ai_config.get("api_key") else "Optional writing help is not set up yet.",
+            status="saved" if ai_config.get("enabled") and ai_config.get("api_key") else "saved" if ai_config.get("api_key") else "setup",
+            status_label="Enabled · checked on use" if ai_config.get("enabled") and ai_config.get("api_key") else "Key saved" if ai_config.get("api_key") else "Set up",
+            detail="Enabled; the provider is verified when Orch makes a writing-help request." if ai_config.get("enabled") and ai_config.get("api_key") else "Access key saved. Turn it on when you want writing help." if ai_config.get("api_key") else "Optional writing help is not set up yet.",
             reason="Useful for summaries, draft polishing, course guides, and one extra suggestion when normal sorting is unsure.",
             action=_connection_action(reverse("settings_edit"), "Manage" if ai_config.get("api_key") else "Set up"),
             meta="Optional",
@@ -321,9 +334,9 @@ def connections_home(request):
         _connection_card(
             title="YouTube recommendations",
             area="Resource Radar",
-            status="connected" if youtube_config.get("enabled") and youtube_config.get("api_key") else "saved" if youtube_config.get("api_key") else "add",
-            status_label="Connected" if youtube_config.get("enabled") and youtube_config.get("api_key") else "Saved" if youtube_config.get("api_key") else "Add",
-            detail="Real video picks are enabled." if youtube_config.get("enabled") and youtube_config.get("api_key") else "YouTube key saved. Turn it on when you want direct video picks." if youtube_config.get("api_key") else "Resource Radar still works with search links.",
+            status="saved" if youtube_config.get("enabled") and youtube_config.get("api_key") else "saved" if youtube_config.get("api_key") else "add",
+            status_label="Enabled · checked on use" if youtube_config.get("enabled") and youtube_config.get("api_key") else "Key saved" if youtube_config.get("api_key") else "Add",
+            detail="Enabled; the key is verified when Orch makes a video request." if youtube_config.get("enabled") and youtube_config.get("api_key") else "YouTube key saved. Turn it on when you want direct video picks." if youtube_config.get("api_key") else "Resource Radar still works with search links.",
             reason="Add it when you want Orch to pick specific videos for saved topics instead of giving a search query.",
             action=_connection_action(reverse("settings_edit"), "Manage" if youtube_config.get("api_key") else "Add"),
             meta="Optional",
@@ -332,9 +345,9 @@ def connections_home(request):
         _connection_card(
             title="GitHub Repo Search",
             area="Code resources",
-            status="connected",
-            status_label="Connected",
-            detail="Repo recommendations work anonymously without setup.",
+            status="available",
+            status_label="Available",
+            detail="Public-repo search needs no GitHub account; requests are checked when you search.",
             reason="Useful when a topic needs real code examples to inspect.",
             action=_connection_action(reverse("resource_radar"), "Open"),
             meta="No key required",
@@ -342,29 +355,40 @@ def connections_home(request):
         ),
     ]
 
+    app_settings = AppSettings.get_solo()
+    watched_folders = diagnostics.check_all_watched_folders(
+        settings=app_settings,
+        active_profile=profile,
+    )
+    folders_ready = bool(watched_folders) and all(
+        folder.get("exists") and folder.get("is_dir")
+        and folder.get("readable") and folder.get("writable")
+        for folder in watched_folders
+    )
+    watcher_running = bool(diagnostics.get_watcher_status().get("running") and folders_ready)
     storage_cards = [
         _connection_card(
             title="Google Drive Backup",
             area="Cloud backup",
-            status="connected" if drive_connected else "saved" if drive_ready else "add",
-            status_label="Connected" if drive_connected else "Ready to connect" if drive_ready else "Add",
+            status="saved" if drive_linked else "saved" if drive_ready else "add",
+            status_label="Account linked · checked on backup" if drive_linked else "Ready to connect" if drive_ready else "Add",
             detail=(
-                f"Connected{f' as {drive_email}' if drive_email else ''}."
-                if drive_connected else
+                f"Account token stored{f' for {drive_email}' if drive_email else ''}; access is checked on backup."
+                if drive_linked else
                 "Google credentials saved; connect the account." if drive_ready else
                 "Client ID and secret not configured."
             ),
             reason="Keeps sorted files recoverable while preserving Orch's local-first design.",
-            action=_connection_action(reverse("drive_connect") if drive_ready and not drive_connected else reverse("settings_edit"), "Connect" if drive_ready and not drive_connected else "Manage" if drive_connected else "Add"),
+            action=_connection_action(reverse("drive_connect") if drive_ready and not drive_linked else reverse("settings_edit"), "Connect" if drive_ready and not drive_linked else "Manage" if drive_linked else "Add"),
             meta="App-wide",
             scope="Backup",
         ),
         _connection_card(
             title="Local Folder Watcher",
             area="Local sorting",
-            status="connected",
-            status_label="Connected",
-            detail=f"Watching {AppSettings.get_solo().downloads_path}",
+            status="connected" if watcher_running else "error" if app_settings.downloads_path else "setup",
+            status_label="Active" if watcher_running else "Not running" if app_settings.downloads_path else "Set up",
+            detail=f"Watching {app_settings.downloads_path}." if watcher_running else f"Configured for {app_settings.downloads_path}, but its folders or heartbeat need attention." if app_settings.downloads_path else "Choose a downloads folder to start local sorting.",
             reason="This is Orch's core engine: files arrive locally, then rules and profiles decide what happens.",
             action=_connection_action(reverse("settings_edit"), "Tune"),
             meta=f"{active_categories} optional categor{'ies' if active_categories != 1 else 'y'} on",
@@ -420,8 +444,8 @@ def connections_home(request):
         _connection_card(
             title="Markdown / HTML Export",
             area="Publishing",
-            status="connected",
-            status_label="Connected",
+            status="available",
+            status_label="Available",
             detail="Manual exports are ready with no external account.",
             reason="This keeps Orch useful even when APIs are unavailable: copy, upload, or paste anywhere.",
             action=_connection_action(drafts_url, "Open drafts" if has_profile else "Create profile"),
@@ -437,11 +461,11 @@ def connections_home(request):
         {"title": "Publishing", "detail": "Where approved drafts can go after your click.", "cards": publishing_cards},
     ]
     all_cards = [card for group in groups for card in group["cards"]]
-    connected_count = sum(1 for card in all_cards if card["status"] in {"connected", "saved"})
-    actionable_count = sum(1 for card in all_cards if card["status"] in {"add", "setup"})
-    blocked_count = sum(1 for card in all_cards if card["status"] in {"blocked", "not_connected", "error", "needs_key"})
-    next_action = next((card for card in all_cards if card["status"] == "setup"), None) or next(
-        (card for card in all_cards if card["status"] == "add"), None
+    ready_count = sum(1 for card in all_cards if card["status"] in {"connected", "available"})
+    actionable_count = sum(1 for card in all_cards if card["status"] in {"add", "setup", "saved", "error", "needs_key"})
+    blocked_count = sum(1 for card in all_cards if card["status"] in {"blocked", "not_connected", "planned"})
+    next_action = next((card for card in all_cards if card["status"] == "error"), None) or next(
+        (card for card in all_cards if card["status"] in {"setup", "needs_key", "saved", "add"}), None
     )
 
     failed_backup_count = (
@@ -451,7 +475,7 @@ def connections_home(request):
     return render(request, "organizer/connections.html", {
         "profile": profile,
         "groups": groups,
-        "connected_count": connected_count,
+        "ready_count": ready_count,
         "total_count": len(all_cards),
         "actionable_count": actionable_count,
         "blocked_count": blocked_count,
@@ -516,17 +540,23 @@ def muele_connect(request):
             if not username or not password:
                 messages.error(request, "Enter your MUELE username and password.")
             else:
-                token, error = muele_api.generate_token(username, password)
+                token, error = muele_api.generate_token(username, password, profile=profile)
                 if error:
                     messages.error(request, f"MUELE login failed: {error}")
                     login_error = error
                 elif token:
-                    token_status = "valid"
-                    user_info, _ = muele_api.verify_token(token)
-                    messages.success(
-                        request,
-                        f"Logged in to MUELE as {user_info['fullname'] if user_info else username}"
-                    )
+                    user_info, error = muele_api.verify_token(token)
+                    if error or not user_info:
+                        login_error = error or "MUELE did not confirm this account."
+                        token_status = "invalid"
+                        muele_api.clear_profile_pending_token(profile)
+                        messages.error(request, f"MUELE login could not be verified: {login_error}")
+                    else:
+                        token_status = "valid"
+                        messages.success(
+                            request,
+                            f"Logged in to MUELE as {user_info['fullname'] or username}"
+                        )
 
         # Method 2: Manual token entry
         elif action == "verify_token":
@@ -537,7 +567,7 @@ def muele_connect(request):
                     messages.error(request, f"Token verification failed: {error}")
                     token_status = "invalid"
                 else:
-                    stored, store_error = muele_api.store_token(token)
+                    stored, store_error = muele_api.store_profile_pending_token(profile, token)
                     if stored:
                         token_status = "valid"
                         messages.success(request, f"Connected as {user_info['fullname']}")
@@ -546,74 +576,118 @@ def muele_connect(request):
                         messages.error(request, f"Token verified but could not be saved: {store_error}")
 
         elif action == "save_connection":
-            # Check for stored token
-            stored_token = muele_api.load_token()
+            stored_token = muele_api.load_profile_pending_token(profile)
             if not stored_token:
                 messages.error(request, "Connect to MUELE first via login or token entry.")
                 return redirect("muele_connect")
 
-            # Update or create the connection
-            if connection is None:
+            user_info, error = muele_api.verify_token(stored_token)
+            if error or not user_info:
+                messages.error(request, f"MUELE token verification failed: {error or 'account details were not returned'}")
+                return redirect("muele_connect")
+            courses, error = muele_api.get_courses(token=stored_token)
+            if error:
+                messages.error(request, f"MUELE course check failed; the connection was not changed: {error}")
+                return redirect("muele_connect")
+            if any(not isinstance(course, dict) or course.get("id") is None for course in courses):
+                messages.error(request, "MUELE returned incomplete course data; the connection was not changed.")
+                return redirect("muele_connect")
+
+            created = connection is None
+            if created:
                 connection = IntegrationConnection.objects.create(
                     profile=profile,
                     provider="muele",
                     display_name="Makerere MUELE",
                     base_url=study.MUELE_BASE_URL,
-                    status="connected",
-                    username=request.POST.get("username", "").strip(),
-                    config={
-                        "sync_targets": request.POST.getlist("sync_targets") or ["course_files", "assignments", "calendar"],
-                        "college": request.POST.get("college", "").strip(),
-                    },
+                    status="configured",
                 )
-            else:
-                connection.status = "connected"
-                connection.username = request.POST.get("username", "").strip() or connection.username
-                connection.config = {
-                    **(connection.config or {}),
-                    "college": request.POST.get("college", "").strip(),
-                    "sync_targets": request.POST.getlist("sync_targets") or ["course_files", "assignments", "calendar"],
-                }
-                connection.save()
-            messages.success(request, "MUELE connection saved.")
 
-            # Fetch and save courses (still via the pending token -- not yet
-            # moved to the connection-specific key)
-            courses, error = muele_api.get_courses(token=stored_token)
-            if not error and courses:
-                from ..models import MueleCourse
+            previous_token = muele_api.load_connection_token(connection)
+            stored, store_error = muele_api.store_connection_token(connection, stored_token)
+            if not stored:
+                if created:
+                    connection.delete()
+                messages.error(request, store_error or "MUELE token could not be saved securely.")
+                return redirect("muele_connect")
 
-                for course in courses:
-                    MueleCourse.objects.update_or_create(
-                        connection=connection,
-                        course_id=course["id"],
-                        defaults={
-                            "course_name": course["fullname"],
-                            "course_code": course["shortname"],
-                            "auto_download": True,
-                            "enrolled": True,
-                        },
+            try:
+                with transaction.atomic():
+                    connection.status = "connected"
+                    connection.base_url = study.MUELE_BASE_URL
+                    connection.username = (
+                        request.POST.get("username", "").strip()
+                        or user_info.get("fullname")
+                        or user_info.get("username")
+                        or ""
                     )
-                messages.success(request, f"Found {len(courses)} MUELE courses.")
+                    connection.config = {
+                        **(connection.config or {}),
+                        "college": request.POST.get("college", "").strip(),
+                        "sync_targets": request.POST.getlist("sync_targets")
+                        or ["course_files", "assignments", "calendar"],
+                    }
+                    connection.last_sync_at = timezone.now()
+                    connection.save()
 
-            # The token now belongs to this connection, not the pending
-            # login -- move it so other profiles connecting their own MUELE
-            # account never share it (see load_connection_token).
-            muele_api.store_connection_token(connection, stored_token)
-            muele_api.clear_token()
+                    from ..models import MueleCourse
+
+                    connection.muele_courses.update(enrolled=False)
+                    for course in courses:
+                        MueleCourse.objects.update_or_create(
+                            connection=connection,
+                            course_id=course["id"],
+                            defaults={
+                                "course_name": course["fullname"],
+                                "course_code": course["shortname"],
+                                "auto_download": True,
+                                "enrolled": True,
+                            },
+                        )
+            except DatabaseError:
+                if previous_token:
+                    muele_api.store_connection_token(connection, previous_token)
+                else:
+                    muele_api.clear_connection_token(connection)
+                if created:
+                    connection.delete()
+                logger.exception("Could not commit verified MUELE connection for profile %s.", profile.pk)
+                messages.error(request, "MUELE was verified, but Orch could not save the connection. Your previous settings are unchanged.")
+                return redirect("muele_connect")
+
+            messages.success(request, "MUELE connection verified and saved.")
+            messages.success(request, f"Found {len(courses)} MUELE courses.")
+            muele_api.clear_profile_pending_token(profile)
             return redirect("muele_courses")
 
-    # Check if a token is already stored -- this connection's own token if
-    # one exists, otherwise a pending token from an in-progress login.
-    stored_token = muele_api.load_connection_token(connection) if connection else muele_api.load_token()
-    if stored_token:
-        user_info, _ = muele_api.verify_token(stored_token)
-        if user_info:
+    connection_token = muele_api.load_connection_token(connection) if connection else None
+    pending_token = muele_api.load_profile_pending_token(profile)
+    muele_connected = False
+    if connection and connection.status == "connected":
+        if connection_token:
+            connection_user_info, connection_error = muele_api.verify_token(connection_token)
+            muele_connected = bool(connection_user_info and not connection_error)
+        if not muele_connected:
+            connection.status = "error"
+            connection.save(update_fields=["status", "updated_at"])
+            messages.error(request, "The saved MUELE connection could not be verified. Reconnect it to continue syncing.")
+
+    stored_token = pending_token or connection_token
+    if pending_token and stored_token and token_status is None:
+        user_info, verify_error = muele_api.verify_token(stored_token)
+        if user_info and not verify_error:
             token_status = "valid"
+        else:
+            token_status = "invalid"
+            messages.error(request, f"MUELE token verification failed: {verify_error or 'account details were not returned'}")
+    elif muele_connected:
+        user_info = connection_user_info
+        token_status = "valid"
 
     return render(request, "organizer/muele_connect.html", {
         "profile": profile,
         "connection": connection,
+        "muele_connected": muele_connected,
         "token_status": token_status,
         "user_info": user_info,
         "login_error": login_error,
@@ -785,9 +859,9 @@ def timetable_connect(request):
             )
             count, error = timetable_sync.sync_group_timetable(profile, connection)
             if error and not count:
-                messages.error(request, f"Connected, but the sync had trouble: {error}")
+                messages.error(request, f"Timetable setup was saved, but sync could not be verified: {error}")
             else:
-                messages.success(request, f"Connected. Synced {count} timetable entries for {group}.")
+                messages.success(request, f"Timetable verified. Synced {count} entries for {group}.")
             return redirect("timetable_view")
 
     return render(request, "organizer/timetable_connect.html", {

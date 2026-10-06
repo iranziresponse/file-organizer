@@ -98,6 +98,7 @@ class OrchMainWindow:
     def __init__(self, watcher_controller=None):
         self.watcher = watcher_controller
         self.is_fullscreen = False
+        self._show_after_load = False
         # No initial url: the dashboard server may not have finished binding
         # its socket yet when this window is created (see gui/app.py's
         # startup sequence), and loading before it's ready would show a
@@ -105,7 +106,7 @@ class OrchMainWindow:
         # once it has confirmed the server actually answers.
         width, height, x, y = self._sized_and_centered_for_screen(1280, 820)
         self.window = webview.create_window(
-            "Orch",
+            "Orch Loading",
             width=width,
             height=height,
             x=x,
@@ -158,8 +159,17 @@ class OrchMainWindow:
         # signal -- is the first reliable point after real content exists
         # to do that.
         self.schedule_repaint_nudge()
+        if self._show_after_load:
+            self._show_after_load = False
+            self.window.title = "Orch"
+            self.show()
 
     def show(self):
+        # A freshly launched WebView can otherwise expose its empty native
+        # surface while the dashboard is still loading. Defer startup and
+        # tray show requests until the first real page has finished loading.
+        if self._show_after_load:
+            return
         self._clamp_to_screen()
         self.window.show()
         try:
@@ -346,10 +356,19 @@ class OrchMainWindow:
                 continue
         return None
 
-    def open_path(self, path=""):
+    def open_path(self, path="", show_after_load=False):
         """Navigate the embedded view to a specific dashboard path, e.g.
-        "study/" or "profiles/new/" -- used by the tray menu."""
-        self.window.load_url(dashboard_url() + path)
+        "study/" or "profiles/new/" -- used by the tray menu. Set
+        show_after_load for the initial desktop launch so the native window
+        stays hidden until the dashboard has rendered."""
+        if show_after_load:
+            self._show_after_load = True
+        try:
+            self.window.load_url(dashboard_url() + path)
+        except Exception:
+            if show_after_load:
+                self._show_after_load = False
+            raise
 
     def _on_closing(self):
         # Returning False cancels the close; hide instead so the tray icon

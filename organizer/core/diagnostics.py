@@ -405,15 +405,20 @@ def check_folder_permissions(folder_path: str) -> dict:
     return result
 
 
-def check_all_watched_folders() -> list[dict]:
+_ACTIVE_PROFILE_UNSET = object()
+
+
+def check_all_watched_folders(settings=None, active_profile=_ACTIVE_PROFILE_UNSET) -> list[dict]:
     """Check permissions for all configured watched folders. AppSettings is
     a get-or-create singleton (see AppSettings.get_solo) -- callers get a
     real check against the default folders even before the user has ever
-    opened Settings, instead of a silent empty list."""
+    opened Settings, instead of a silent empty list. Existing settings and
+    profile objects can be supplied by callers that already loaded them."""
     from organizer.models import AppSettings
 
     results = []
-    settings = AppSettings.get_solo()
+    if settings is None:
+        settings = AppSettings.get_solo()
 
     # Primary downloads
     if settings.downloads_path:
@@ -436,7 +441,11 @@ def check_all_watched_folders() -> list[dict]:
     # Active profile root
     from organizer.models import Profile
 
-    active = Profile.get_active()
+    active = (
+        Profile.get_active()
+        if active_profile is _ACTIVE_PROFILE_UNSET
+        else active_profile
+    )
 
     if active and active.root_path:
         result = check_folder_permissions(active.root_path)

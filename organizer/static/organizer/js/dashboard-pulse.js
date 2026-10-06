@@ -13,13 +13,31 @@
     if (!strip || !strip.hasAttribute('data-pulse-strip')) {
         return;
     }
+    var refresh = document.getElementById('pulse-refresh');
+    var refreshLabel = refresh && refresh.querySelector('[data-pulse-refresh-label]');
 
     var POLL_ACTIVE_MS = 5000;
     var POLL_IDLE_MS = 30000;
     var timerId = null;
+    var requestInFlight = false;
     // Seeded from the server-rendered strip so the first poll waits the
     // right amount of time instead of always hammering at 5s.
     var lastActive = strip.getAttribute('data-pulse-active') === '1';
+
+    function setRefreshState(state) {
+        if (!refresh || !refreshLabel || refresh.getAttribute('data-state') === state) {
+            return;
+        }
+        refresh.setAttribute('data-state', state);
+        refresh.classList.toggle('is-error', state === 'error' || state === 'partial');
+        refreshLabel.textContent = state === 'error'
+            ? 'Live updates unavailable'
+            : state === 'partial'
+                ? 'Activity unavailable'
+                : state === 'updating'
+                    ? 'Checking…'
+                    : 'Live · just now';
+    }
 
     function el(tag, className, text) {
         var node = document.createElement(tag);
@@ -55,6 +73,10 @@
         if (!data || !data.has_profile) {
             return;
         }
+        if (data.pulse_error) {
+            setRefreshState('error');
+            return;
+        }
         var next = document.createDocumentFragment();
         if (data.sorting) next.appendChild(badge('sorting', data.sorting, false));
         if (data.in_flight) next.appendChild(badge('in_flight', data.in_flight, true));
@@ -69,9 +91,10 @@
 
         // Same consolidated poll feeds the activity film, so the page
         // never grows a second timer for it.
-        if (data.activity && window.OrchActivityFilm) {
+        if (!data.activity_error && data.activity && window.OrchActivityFilm) {
             window.OrchActivityFilm.update(data.activity);
         }
+        setRefreshState(data.activity_error ? 'partial' : 'live');
     }
 
     function scheduleNext() {
@@ -79,22 +102,49 @@
     }
 
     function tick() {
+        if (requestInFlight) {
+            return;
+        }
         if (document.hidden) {
             // Same reasoning as status-bar.js: keep the loop alive but do
             // no work while nobody is looking at the page.
             scheduleNext();
             return;
         }
+        if (refresh && refresh.getAttribute('data-state') === 'error') {
+            setRefreshState('updating');
+        }
+        requestInFlight = true;
         fetch('/api/pulse/', { credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) {
+                    throw new Error('Live dashboard request failed with HTTP ' + r.status);
+                }
+                return r.json();
+            })
             .then(render)
-            .catch(function () {})
-            .then(scheduleNext);
+            .catch(function (error) {
+                console.warn('Orch could not refresh live dashboard data.', error);
+                setRefreshState('error');
+            })
+            .then(function () {
+                requestInFlight = false;
+                scheduleNext();
+            });
+    }
+
+    if (refresh) {
+        refresh.addEventListener('click', function () {
+            if (timerId) clearTimeout(timerId);
+            setRefreshState('updating');
+            tick();
+        });
     }
 
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) {
             if (timerId) clearTimeout(timerId);
+            setRefreshState('updating');
             tick();
         }
     });

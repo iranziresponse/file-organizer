@@ -8,7 +8,11 @@ window is hidden). data-pulse-active carries the initial "is anything
 running" flag so the poller starts at the right cadence.
 {% endcomment %}
 <section class="pulse-strip" id="pulse-strip" aria-label="Live status"
-         data-pulse-strip data-pulse-active="{% if pulse.active %}1{% else %}0{% endif %}">
+         data-pulse-strip data-pulse-active="{% if pulse.active %}1{% else %}0{% endif %}"
+         data-pulse-error="{% if pulse.pulse_error %}1{% else %}0{% endif %}">
+    {% if pulse.pulse_error %}
+    <span class="pulse-badge is-error">Live status unavailable</span>
+    {% else %}
 
     {% with s=pulse.sorting %}
     <a class="pulse-badge is-{{ s.state }}" href="{{ s.url }}" data-badge="sorting">
@@ -60,4 +64,12 @@ running" flag so the poller starts at the right cadence.
     </a>
     {% endwith %}
     {% endif %}
+    {% endif %}
+
+    <button type="button" class="pulse-refresh{% if pulse.pulse_error or activity_stream_error %} is-error{% endif %}"
+            id="pulse-refresh" data-state="{% if pulse.pulse_error or activity_stream_error %}error{% else %}live{% endif %}"
+            aria-label="Refresh live dashboard status" aria-live="polite">
+        <span class="pulse-refresh__dot" aria-hidden="true"></span>
+        <span data-pulse-refresh-label>{% if pulse.pulse_error %}Status unavailable{% elif activity_stream_error %}Activity unavailable{% else %}Live · just now{% endif %}</span>
+    </button>
 </section>

@@ -67,7 +67,7 @@
         })();
     </script>
     <link rel="stylesheet" href="{% static 'organizer/css/base.css' %}?v={{ ORCH_STATIC_VERSION }}">
-    <link rel="stylesheet" href="{% static 'organizer/css/premium.css' %}?v={{ ORCH_STATIC_VERSION }}">
+    <link rel="stylesheet" href="{% static 'organizer/css/orch.css' %}?v={{ ORCH_STATIC_VERSION }}-identity-3">
     <script src="{% static 'organizer/js/nav-dropdowns.js' %}?v={{ ORCH_STATIC_VERSION }}"></script>
 </head>
 <body{% if is_desktop_shell %} class="has-desktop-titlebar"{% endif %}>
@@ -333,8 +333,11 @@
             </a>
             <a href="{% url 'settings_edit' %}" class="app-sidebar-link{% if current == 'settings_edit' %} is-active{% endif %}" {% if current == 'settings_edit' %}aria-current="page"{% endif %}>
                 <svg class="app-sidebar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12.2 2.5h-.4a1.6 1.6 0 0 0-1.6 1.6v.2a1.7 1.7 0 0 1-.85 1.47l-.36.2a1.7 1.7 0 0 1-1.7 0l-.16-.1a1.6 1.6 0 0 0-2.18.6l-.2.35a1.6 1.6 0 0 0 .58 2.18l.14.08a1.7 1.7 0 0 1 .85 1.48v.42a1.7 1.7 0 0 1-.85 1.48l-.14.08a1.6 1.6 0 0 0-.58 2.18l.2.35a1.6 1.6 0 0 0 2.18.6l.16-.1a1.7 1.7 0 0 1 1.7 0l.36.2a1.7 1.7 0 0 1 .85 1.48v.2a1.6 1.6 0 0 0 1.6 1.6h.4a1.6 1.6 0 0 0 1.6-1.6v-.2a1.7 1.7 0 0 1 .85-1.47l.36-.2a1.7 1.7 0 0 1 1.7 0l.16.1a1.6 1.6 0 0 0 2.18-.6l.2-.35a1.6 1.6 0 0 0-.58-2.18l-.14-.08a1.7 1.7 0 0 1-.85-1.48v-.42a1.7 1.7 0 0 1 .85-1.48l.14-.08a1.6 1.6 0 0 0 .58-2.18l-.2-.35a1.6 1.6 0 0 0-2.18-.6l-.16.1a1.7 1.7 0 0 1-1.7 0l-.36-.2a1.7 1.7 0 0 1-.85-1.48v-.2a1.6 1.6 0 0 0-1.6-1.6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M6 4v16M12 4v16M18 4v16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    <path d="M4 8h4M10 15h4M16 10h4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+                    <circle cx="6" cy="8" r="2.1" fill="var(--orch-chrome)" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="12" cy="15" r="2.1" fill="var(--orch-chrome)" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="18" cy="10" r="2.1" fill="var(--orch-chrome)" stroke="currentColor" stroke-width="1.5"/>
                 </svg>
                 <span>Settings</span>
             </a>

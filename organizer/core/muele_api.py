@@ -104,6 +104,53 @@ def clear_token() -> None:
         logger.warning("Could not clear MUELE token from the OS keyring: %s", exc)
 
 
+def _profile_pending_token_key(profile) -> str:
+    return f"muele_pending_token_{profile.pk}"
+
+
+def store_profile_pending_token(profile, token: str) -> tuple[bool, str | None]:
+    """Store an in-progress login token under its owning local profile."""
+    try:
+        import keyring
+
+        keyring.set_password(_KEYRING_SERVICE, _profile_pending_token_key(profile), token)
+        return True, None
+    except ImportError:
+        logger.warning("keyring package not installed; cannot store a pending MUELE token.")
+        return False, "The keyring package is not installed, so the token can't be saved securely."
+    except Exception as exc:
+        logger.warning("Could not store pending MUELE token in the OS keyring: %s", exc)
+        return False, f"Could not save the token to your OS credential store: {exc}"
+
+
+def load_profile_pending_token(profile) -> str | None:
+    """Load only the in-progress MUELE token belonging to this profile."""
+    try:
+        import keyring
+
+        return keyring.get_password(_KEYRING_SERVICE, _profile_pending_token_key(profile))
+    except ImportError:
+        logger.warning("keyring package not installed; treating pending MUELE login as disconnected.")
+        return None
+    except Exception as exc:
+        logger.warning("Could not read pending MUELE token from the OS keyring: %s", exc)
+        return None
+
+
+def clear_profile_pending_token(profile) -> None:
+    """Remove one profile's in-progress token without touching other profiles."""
+    try:
+        import keyring
+
+        keyring.delete_password(_KEYRING_SERVICE, _profile_pending_token_key(profile))
+    except ImportError:
+        logger.warning("keyring package not installed; nothing to clear.")
+    except keyring.errors.PasswordDeleteError:
+        pass
+    except Exception as exc:
+        logger.warning("Could not clear pending MUELE token from the OS keyring: %s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Per-connection token management -- store_token/load_token/clear_token above
 # hold the *pending* token from an in-progress login, before a connection
@@ -139,13 +186,8 @@ def load_connection_token(connection) -> str | None:
     """Load the MUELE token for one specific connection. Returns None if not
     set or the keyring is unavailable -- never throws.
 
-    Self-healing for connections that were `connected` before per-connection
-    tokens existed: if nothing is stored under this connection's own key
-    yet, but a pending/global token is still sitting there from before this
-    migration, adopt it as this connection's token (and clear the global
-    copy) rather than reporting a working connection as suddenly
-    disconnected. Only the first connection to check after an upgrade sees
-    this path; from then on the global key is empty.
+    The legacy global token has no profile owner and is deliberately never
+    adopted here; doing so could silently use another profile's account.
     """
     try:
         import keyring
@@ -159,13 +201,6 @@ def load_connection_token(connection) -> str | None:
     except Exception as exc:
         logger.warning("Could not read MUELE connection token from the OS keyring: %s", exc)
         return None
-
-    legacy_token = load_token()
-    if legacy_token:
-        stored, _ = store_connection_token(connection, legacy_token)
-        if stored:
-            clear_token()
-            return legacy_token
     return None
 
 
@@ -193,6 +228,7 @@ def generate_token(
     password: str,
     service: str = "moodle_mobile_app",
     log: Callable | None = None,
+    profile=None,
 ) -> tuple[str | None, str | None]:
     """Generate a MUELE web service token using username/password login.
 
@@ -202,8 +238,9 @@ def generate_token(
     available", while Moodle's own built-in mobile-app service works, since
     that's the one MUELE has enabled. This calls MUELE's login/token.php
     endpoint directly, which is the standard Moodle token generation API.
-    The token is automatically stored
-    in the keyring on success.
+    The token is automatically stored in the keyring on success. When a
+    profile is provided, it is kept in that profile's pending slot rather
+    than the shared legacy slot.
 
     Returns (token, None) on success or (None, error_message) on failure.
     Never throws.
@@ -246,7 +283,11 @@ def generate_token(
         return None, "MUELE did not return a token. Check your credentials."
 
     # Store the token in the keyring
-    stored, store_error = store_token(token)
+    stored, store_error = (
+        store_profile_pending_token(profile, token)
+        if profile is not None
+        else store_token(token)
+    )
     if not stored:
         return None, f"Logged in, but the token could not be saved: {store_error}"
     return token, None

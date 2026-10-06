@@ -1,12 +1,7 @@
-"""Two profiles, each with their own MUELE connection, must never share a
-token: `run_muele_sync`'s background loop used to load one global token
-before looping over every connected profile, so a second profile's sync
-silently ran with the first profile's credentials. Locks in the fix:
-store_connection_token/load_connection_token/clear_connection_token key on
-connection.pk, and the background loop loads each connection's own token.
-"""
+"""MUELE credentials are scoped to their local profile and connection."""
 
 from threading import Event
+from types import SimpleNamespace
 from unittest import mock
 
 from organizer.core import muele_api, muele_downloader
@@ -15,9 +10,21 @@ from organizer.models import IntegrationConnection
 from .helpers import SandboxedPathsTestCase
 
 
+def install_fake_keyring(test_case):
+    values = {}
+    keyring = SimpleNamespace(
+        set_password=lambda service, key, value: values.__setitem__((service, key), value),
+        get_password=lambda service, key: values.get((service, key)),
+        delete_password=lambda service, key: values.pop((service, key), None),
+        errors=SimpleNamespace(PasswordDeleteError=type("PasswordDeleteError", (Exception,), {})),
+    )
+    test_case.enterContext(mock.patch.dict("sys.modules", {"keyring": keyring}))
+
+
 class ConnectionTokenKeyringTests(SandboxedPathsTestCase):
     def setUp(self):
         super().setUp()
+        install_fake_keyring(self)
         self.profile_a = self.make_profile(name="Profile A")
         self.profile_b = self.make_profile(name="Profile B", is_active=False)
         self.connection_a = IntegrationConnection.objects.create(
@@ -26,20 +33,8 @@ class ConnectionTokenKeyringTests(SandboxedPathsTestCase):
         self.connection_b = IntegrationConnection.objects.create(
             profile=self.profile_b, provider="muele", display_name="MUELE", status="connected",
         )
-        self.addCleanup(muele_api.clear_connection_token, self.connection_a)
-        self.addCleanup(muele_api.clear_connection_token, self.connection_b)
-        # Isolate from this machine's real pending/global token (if any) --
-        # load_connection_token's legacy-migration fallback would otherwise
-        # adopt real leftover state into these test connections, and this
-        # class must never write to or clear a real credential.
-        self.enterContext(mock.patch.object(muele_api, "load_token", return_value=None))
 
     def test_each_connection_keeps_its_own_token(self):
-        try:
-            import keyring  # noqa: F401
-        except ImportError:
-            self.skipTest("keyring package not installed in this environment")
-
         muele_api.store_connection_token(self.connection_a, "token-for-a")
         muele_api.store_connection_token(self.connection_b, "token-for-b")
 
@@ -47,11 +42,6 @@ class ConnectionTokenKeyringTests(SandboxedPathsTestCase):
         self.assertEqual(muele_api.load_connection_token(self.connection_b), "token-for-b")
 
     def test_clearing_one_connections_token_does_not_touch_the_other(self):
-        try:
-            import keyring  # noqa: F401
-        except ImportError:
-            self.skipTest("keyring package not installed in this environment")
-
         muele_api.store_connection_token(self.connection_a, "token-for-a")
         muele_api.store_connection_token(self.connection_b, "token-for-b")
 
@@ -60,40 +50,47 @@ class ConnectionTokenKeyringTests(SandboxedPathsTestCase):
         self.assertIsNone(muele_api.load_connection_token(self.connection_a))
         self.assertEqual(muele_api.load_connection_token(self.connection_b), "token-for-b")
 
+    def test_pending_login_tokens_are_isolated_by_profile(self):
+        values = {}
+        keyring = SimpleNamespace(
+            set_password=lambda service, key, value: values.__setitem__((service, key), value),
+            get_password=lambda service, key: values.get((service, key)),
+            delete_password=lambda service, key: values.pop((service, key), None),
+            errors=SimpleNamespace(PasswordDeleteError=type("PasswordDeleteError", (Exception,), {})),
+        )
+        with mock.patch.dict("sys.modules", {"keyring": keyring}):
+            muele_api.store_profile_pending_token(self.profile_a, "pending-a")
+            muele_api.store_profile_pending_token(self.profile_b, "pending-b")
 
-class LegacyGlobalTokenMigrationTests(SandboxedPathsTestCase):
-    """Connections that were `connected` before per-connection tokens
-    existed must self-heal on next read, not silently look disconnected.
-    Fully mocked -- never touches this machine's real global pending token,
-    which store_token/load_token/clear_token would otherwise read, mutate,
-    or delete for real."""
+            self.assertEqual(muele_api.load_profile_pending_token(self.profile_a), "pending-a")
+            self.assertEqual(muele_api.load_profile_pending_token(self.profile_b), "pending-b")
+            muele_api.clear_profile_pending_token(self.profile_a)
+
+            self.assertIsNone(muele_api.load_profile_pending_token(self.profile_a))
+            self.assertEqual(muele_api.load_profile_pending_token(self.profile_b), "pending-b")
+
+
+class LegacyGlobalTokenIsolationTests(SandboxedPathsTestCase):
+    """An old token without an owner must never be attached to a profile."""
 
     def setUp(self):
         super().setUp()
+        install_fake_keyring(self)
         self.profile = self.make_profile()
         self.connection = IntegrationConnection.objects.create(
             profile=self.profile, provider="muele", display_name="MUELE", status="connected",
         )
-        self.addCleanup(muele_api.clear_connection_token, self.connection)
 
-    def test_adopts_a_leftover_global_token_and_clears_it(self):
-        with mock.patch.object(muele_api, "load_token", return_value="legacy-global-token") as load_token, \
+    def test_does_not_adopt_an_unowned_global_token_when_another_profile_exists(self):
+        other_profile = self.make_profile(name="Another profile", is_active=False)
+        IntegrationConnection.objects.create(
+            profile=other_profile, provider="muele", display_name="MUELE",
+        )
+        with mock.patch.object(muele_api, "load_token", return_value="unowned-token") as load_token, \
              mock.patch.object(muele_api, "clear_token") as clear_token:
             result = muele_api.load_connection_token(self.connection)
 
-        self.assertEqual(result, "legacy-global-token")
-        load_token.assert_called_once()
-        clear_token.assert_called_once()
-        self.assertEqual(muele_api.load_connection_token(self.connection), "legacy-global-token")
-
-    def test_does_not_touch_a_connection_that_already_has_its_own_token(self):
-        muele_api.store_connection_token(self.connection, "own-token")
-
-        with mock.patch.object(muele_api, "load_token", return_value="legacy-global-token") as load_token, \
-             mock.patch.object(muele_api, "clear_token") as clear_token:
-            result = muele_api.load_connection_token(self.connection)
-
-        self.assertEqual(result, "own-token")
+        self.assertIsNone(result)
         load_token.assert_not_called()
         clear_token.assert_not_called()
 
@@ -101,6 +98,7 @@ class LegacyGlobalTokenMigrationTests(SandboxedPathsTestCase):
 class ConnectionTokenKeyringFallbackTests(SandboxedPathsTestCase):
     def setUp(self):
         super().setUp()
+        install_fake_keyring(self)
         self.profile = self.make_profile()
         self.connection = IntegrationConnection.objects.create(
             profile=self.profile, provider="muele", display_name="MUELE",

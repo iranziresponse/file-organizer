@@ -195,7 +195,7 @@ class StudyViewsTests(SandboxedPathsTestCase):
 
         response = self.client.get(reverse("study_home"))
 
-        self.assertContains(response, "Watching Downloads")
+        self.assertContains(response, "Watcher paused")
         self.assertContains(response, "Today")
         self.assertContains(response, "Next best action")
         self.assertContains(response, "Live activity feed")

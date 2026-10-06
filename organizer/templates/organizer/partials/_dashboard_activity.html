@@ -35,7 +35,7 @@ contents, at most once every 30s.
         </li>
         {% empty %}
         <li class="activity-row activity-row--empty">
-            <span class="activity-row__text">Nothing yet. As Orch sorts files, runs syncs, and schedules reviews, it will show up here.</span>
+            <span class="activity-row__text">{% if activity_stream_error %}Activity could not be loaded. Live updates will try again automatically.{% else %}Nothing yet. As Orch sorts files, runs syncs, and schedules reviews, it will show up here.{% endif %}</span>
         </li>
         {% endfor %}
     </ol>

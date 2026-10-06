@@ -281,7 +281,7 @@ def pulse_data(request):
     so the page never grows a separate timer for that."""
     profile = Profile.get_active()
     payload = pulse_core.get_snapshot(profile)
-    payload["activity"] = pulse_core.get_activity_stream_json(profile)
+    payload["activity"], payload["activity_error"] = pulse_core.get_activity_stream_json_with_status(profile)
     return JsonResponse(payload)
 
 
@@ -376,14 +376,12 @@ def _app_status(profile, last_move):
         item.get("exists") and item.get("is_dir") and item.get("readable") and item.get("writable")
         for item in folders
     )
-    # "value" names the folder Orch actually watches, since the watcher is
-    # a background thread of this same process (always on whenever the app
-    # is open, not a separately toggled service) -- claiming "Paused"
-    # purely because no file has arrived in the last minute would be
-    # misleading, not honest status. "state"/"detail" still reflect the
-    # watcher's own last-seen-activity signal.
+    # A configured path is not proof that the watcher is alive. The heartbeat
+    # is the source of truth for the live/paused state; folder accessibility
+    # is checked separately below.
     primary_folder = next((item for item in folders if item.get("label") == "Primary downloads"), None)
     watched_folder_name = Path(primary_folder["path"]).name if primary_folder and primary_folder.get("path") else None
+    watcher_running = bool(watcher.get("running"))
     connected_sources = (
         IntegrationConnection.objects.filter(Q(profile=profile) | Q(profile__isnull=True), status="connected")
         if profile else []
@@ -394,9 +392,9 @@ def _app_status(profile, last_move):
     return [
         {
             "label": "Downloads folder",
-            "value": f"Watching {watched_folder_name}" if watched_folder_name else "Not configured",
+            "value": f"Watching {watched_folder_name}" if watcher_running and watched_folder_name else "Watcher paused" if watched_folder_name else "Not configured",
             "detail": _short_timesince(datetime.fromisoformat(watcher["last_activity"])) if watcher.get("last_activity") else "No recent check yet",
-            "state": "live" if watched_folder_name and folders_ok else "warning",
+            "state": "live" if watcher_running and watched_folder_name and folders_ok else "warning",
         },
         {
             "label": "Folders",
@@ -725,7 +723,7 @@ def _service_item(name, state, detail, insight, url=None, action_label="Open"):
 
 
 def _service_mesh_context(profile, app_status_items, pending_decisions=0):
-    from ..core import ai_classify, drive_api, youtube_api
+    from ..core import ai_classify, diagnostics, drive_api, muele_api, youtube_api
 
     muele_connection = (
         IntegrationConnection.objects.filter(profile=profile, provider="muele").first()
@@ -736,8 +734,18 @@ def _service_mesh_context(profile, app_status_items, pending_decisions=0):
         if profile else None
     )
     timetable_entries = TimetableEntry.objects.filter(profile=profile).count() if profile else 0
-    muele_connected = bool(muele_connection and (muele_connection.status == "connected" or muele_connection.username or muele_connection.last_sync_at))
-    timetable_connected = bool(timetable_connection and (timetable_entries or (timetable_connection.config or {}).get("group")))
+    muele_token_available = bool(muele_api.load_connection_token(muele_connection)) if muele_connection else False
+    muele_needs_attention = bool(
+        muele_connection and (
+            muele_connection.status == "error"
+            or (muele_connection.status == "connected" and not muele_token_available)
+        )
+    )
+    muele_connected = bool(
+        muele_connection and muele_connection.status == "connected" and muele_token_available
+    )
+    timetable_connected = bool(timetable_connection and timetable_connection.status == "connected")
+    timetable_configured = bool(timetable_connection and (timetable_connection.config or {}).get("group"))
 
     ai_config = ai_classify.load_ai_config() or {}
     youtube_config = youtube_api.load_youtube_config() or {}
@@ -747,7 +755,8 @@ def _service_mesh_context(profile, app_status_items, pending_decisions=0):
     youtube_ready = bool(youtube_config.get("enabled") and youtube_config.get("api_key"))
     youtube_saved = bool(youtube_config.get("api_key"))
     drive_configured = bool(drive_config.get("enabled") and drive_config.get("client_id") and drive_config.get("client_secret"))
-    drive_connected = bool(drive_configured and drive_api.is_connected())
+    drive_linked = bool(drive_configured and drive_api.is_connected())
+    watcher_running = diagnostics.get_watcher_status().get("running", False)
     learning_profile = _profile_uses_learning_tools(profile)
 
     GlobalSortCategory.ensure_defaults()
@@ -768,7 +777,7 @@ def _service_mesh_context(profile, app_status_items, pending_decisions=0):
             "items": [
                 _service_item(
                     "Downloads watcher",
-                    app_status_items[0]["state"],
+                    "live" if watcher_running and app_status_items[0]["state"] == "live" else "warning",
                     app_status_items[0]["value"],
                     app_status_items[0]["detail"],
                     reverse("first_run"),
@@ -806,24 +815,24 @@ def _service_mesh_context(profile, app_status_items, pending_decisions=0):
             "items": [
                 _service_item(
                     "Makerere MUELE",
-                    "live" if muele_connected else "warning" if learning_profile else "muted",
-                    "Course files and assignment dates" if muele_connection and muele_connection.status == "connected" else "MUELE details saved" if muele_connected else "Connect to bring in course files and assignment dates" if learning_profile else "Optional Makerere course file sync",
-                    f"Last sync {_short_timesince(muele_connection.last_sync_at)}" if muele_connection and muele_connection.last_sync_at else "Optional Makerere support for course files",
+                    "live" if muele_connected else "warning" if learning_profile and muele_needs_attention else "warning" if learning_profile else "muted",
+                    "Course files and assignment dates" if muele_connected else "MUELE needs attention; reconnect or retry" if muele_needs_attention else "Connect to bring in course files and assignment dates" if learning_profile else "Optional Makerere course file sync",
+                    f"Last successful sync {_short_timesince(muele_connection.last_sync_at)}" if muele_connection and muele_connection.last_sync_at else "No successful MUELE sync yet",
                     reverse("muele_courses") if muele_connected else reverse("muele_connect"),
                     "Manage" if muele_connected else "Connect",
                 ),
                 _service_item(
                     "Makerere Timetable",
-                    "live" if timetable_connected else "warning" if learning_profile else "muted",
-                    f"{timetable_entries} timetable entries added" if timetable_entries else f"Saved for {(timetable_connection.config or {}).get('group')}" if timetable_connected else "Add your timetable" if learning_profile else "Optional timetable reminders",
+                    "live" if timetable_connected else "warning" if learning_profile and timetable_connection and timetable_connection.status == "error" else "warning" if learning_profile else "muted",
+                    f"{timetable_entries} timetable entries synced" if timetable_connected and timetable_entries else f"Sync succeeded; no timetable entries are currently listed" if timetable_connected else f"Saved for {(timetable_connection.config or {}).get('group')}; sync not verified" if timetable_configured else "Add your timetable" if learning_profile else "Optional timetable reminders",
                     "Useful for class, session, or training reminders",
                     reverse("timetable_view") if timetable_connected else reverse("timetable_connect"),
                     "View" if timetable_connected else "Connect",
                 ),
                 _service_item(
                     "Resource Radar",
-                    "live" if youtube_ready else "saved" if youtube_saved else "muted",
-                    "YouTube search is connected" if youtube_ready else "YouTube key saved" if youtube_saved else "Works with search links; a YouTube key improves video picks",
+                    "saved" if youtube_ready or youtube_saved else "muted",
+                    "YouTube key enabled; checked on use" if youtube_ready else "YouTube key saved" if youtube_saved else "Works with search links; a YouTube key improves video picks",
                     "Finds videos and books for saved topics",
                     reverse("resource_radar"),
                     "Open",
@@ -868,17 +877,17 @@ def _service_mesh_context(profile, app_status_items, pending_decisions=0):
                 ),
                 _service_item(
                     "Summaries and writing help",
-                    "live" if smart_orch_ready else "saved" if smart_orch_saved else "muted",
-                    "Writing help is turned on" if smart_orch_ready else "Access key saved" if smart_orch_saved else "Optional writing help is not set up",
+                    "saved" if smart_orch_ready or smart_orch_saved else "muted",
+                    "Writing help enabled; checked on use" if smart_orch_ready else "Access key saved" if smart_orch_saved else "Optional writing help is not set up",
                     "Orch can still sort files without this",
                     reverse("settings_edit"),
                     "Settings",
                 ),
                 _service_item(
                     "Google Drive Backup",
-                    "live" if drive_connected else "saved" if drive_configured else "muted",
-                    "Connected" if drive_connected else "Configured but not connected" if drive_configured else "Optional backup",
-                    "Can copy sorted files to Drive if you connect it",
+                    "saved" if drive_linked or drive_configured else "muted",
+                    "Account token stored; checked on backup" if drive_linked else "Configured but not connected" if drive_configured else "Optional backup",
+                    "Drive access is confirmed when a backup succeeds",
                     reverse("settings_edit"),
                     "Settings",
                 ),
@@ -898,7 +907,7 @@ def _service_mesh_context(profile, app_status_items, pending_decisions=0):
         lane["items"] = visible_items
 
     all_items = [item for lane in lanes for item in lane["items"]]
-    connected_count = sum(1 for item in all_items if item["state"] in {"live", "saved"})
+    connected_count = sum(1 for item in all_items if item["state"] == "live")
     total_count = len(all_items)
     missing_count = total_count - connected_count
     readiness = round((connected_count / total_count) * 100) if total_count else 0
@@ -1176,7 +1185,7 @@ def dashboard(request):
     context.update(_muele_panel_context(profile))
     context.update(_cockpit_context(request, profile, events, last_move))
     context["pulse"] = pulse_core.get_snapshot(profile)
-    context["activity_stream"] = pulse_core.get_activity_stream(profile)
+    context["activity_stream"], context["activity_stream_error"] = pulse_core.get_activity_stream_with_status(profile)
     return render(request, "organizer/dashboard.html", context)
 
 

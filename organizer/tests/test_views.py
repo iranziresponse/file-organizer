@@ -559,11 +559,11 @@ class MueleConnectViewTests(SandboxedPathsTestCase):
             status="connected",
         )
 
-        # "MUELE is connected" is driven by connection.status alone (set
-        # above); the page also opportunistically re-verifies any stored
-        # token live to prefill token_status -- mocked out so this test
-        # never depends on this machine's real OS keyring/network state.
-        with mock.patch("organizer.core.muele_api.load_connection_token", return_value=None):
+        with mock.patch("organizer.core.muele_api.load_connection_token", return_value="fake-token"), \
+             mock.patch("organizer.core.muele_api.load_profile_pending_token", return_value=None), \
+             mock.patch("organizer.core.muele_api.verify_token", return_value=({
+                 "fullname": "Student", "username": "student@mak.ac.ug",
+             }, None)):
             response = self.client.get(reverse("muele_connect"))
 
         self.assertContains(response, "MUELE is connected")
@@ -578,7 +578,7 @@ class MueleConnectViewTests(SandboxedPathsTestCase):
         # Hermetic "no pending token" -- without this, a real pending
         # token left in this machine's OS keyring from an earlier session
         # would make this test attempt a real, slow network verification.
-        with mock.patch("organizer.core.muele_api.load_token", return_value=None):
+        with mock.patch("organizer.core.muele_api.load_profile_pending_token", return_value=None):
             response = self.client.get(reverse("muele_connect"))
 
         self.assertNotContains(response, "MUELE is connected")

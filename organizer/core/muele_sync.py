@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
+from django.db import transaction
 from django.utils import timezone
 
 from . import muele_api, muele_calendar
@@ -34,68 +35,74 @@ def import_courses_for_profile(profile, token: str | None = None, log: Callable 
         defaults={
             "display_name": "Makerere MUELE",
             "base_url": muele_api.MUELE_BASE_URL,
-            "status": "connected",
+            "status": "configured",
         },
     )
 
     if token is None:
         token = muele_api.load_connection_token(connection)
     if not token:
+        connection.status = "error"
+        connection.save(update_fields=["status", "updated_at"])
         result["errors"].append("No MUELE token configured")
         return result
-
-    connection.status = "connected"
-    connection.last_sync_at = timezone.now()
-    connection.save()
 
     # Fetch courses from MUELE
     courses, error = muele_api.get_courses(token=token, log=log)
     if error:
+        connection.status = "error"
+        connection.save(update_fields=["status", "updated_at"])
         result["errors"].append(error)
+        return result
+
+    if any(not isinstance(course, dict) or course.get("id") is None for course in courses):
+        connection.status = "error"
+        connection.save(update_fields=["status", "updated_at"])
+        result["errors"].append("MUELE returned a course without an ID.")
         return result
 
     result["total"] = len(courses)
 
-    # Get or create CourseConfig
-    config, _ = CourseConfig.objects.get_or_create(
-        profile=profile,
-        defaults={
-            "primary_value": muele_calendar.get_current_year(),
-            "secondary_value": muele_calendar.get_current_semester(),
-            "groups": [],
-        },
-    )
-
-    existing_codes = set(config.groups or [])
-
-    for course in courses:
-        code = course.get("shortname", "").strip().upper()
-        name = course.get("fullname", "")
-
-        # Create MueleCourse record
-        MueleCourse.objects.update_or_create(
-            connection=connection,
-            course_id=course["id"],
+    with transaction.atomic():
+        config, _ = CourseConfig.objects.get_or_create(
+            profile=profile,
             defaults={
-                "course_name": name,
-                "course_code": code,
-                "auto_download": True,
-                "enrolled": True,
+                "primary_value": muele_calendar.get_current_year(),
+                "secondary_value": muele_calendar.get_current_semester(),
+                "groups": [],
             },
         )
 
-        # Add to profile subject list if not already there
-        if code and code not in existing_codes:
-            existing_codes.add(code)
-            result["imported"] += 1
-            if log:
-                log(f"Imported course: {code} - {name}")
+        existing_codes = set(config.groups or [])
 
-    # Update profile config with new subjects
-    config.groups = sorted(existing_codes)
-    config.primary_value = muele_calendar.get_current_year()
-    config.secondary_value = muele_calendar.get_current_semester()
-    config.save()
+        for course in courses:
+            code = course.get("shortname", "").strip().upper()
+            name = course.get("fullname", "")
+
+            MueleCourse.objects.update_or_create(
+                connection=connection,
+                course_id=course["id"],
+                defaults={
+                    "course_name": name,
+                    "course_code": code,
+                    "auto_download": True,
+                    "enrolled": True,
+                },
+            )
+
+            if code and code not in existing_codes:
+                existing_codes.add(code)
+                result["imported"] += 1
+                if log:
+                    log(f"Imported course: {code} - {name}")
+
+        config.groups = sorted(existing_codes)
+        config.primary_value = muele_calendar.get_current_year()
+        config.secondary_value = muele_calendar.get_current_semester()
+        config.save()
+        connection.status = "connected"
+        connection.last_sync_at = timezone.now()
+        connection.save(update_fields=["status", "last_sync_at", "updated_at"])
 
     if log:
         log(f"Course import complete: {result['imported']} new, {result['total']} total")

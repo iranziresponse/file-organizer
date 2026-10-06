@@ -32,9 +32,8 @@ def is_makerere_profile(profile):
 def ensure_makerere_connection(profile):
     """Create a safe MUELE connection placeholder for Makerere profiles.
 
-    No password or private token is stored here. A later connector can use
-    keyring/cryptography from requirements.txt and write only a token
-    reference back to this row.
+    No password or private token is stored in this row; the active token is
+    kept in the OS keyring and the connection status reflects sync results.
     """
     if not is_makerere_profile(profile):
         return None
@@ -53,15 +52,9 @@ def ensure_makerere_connection(profile):
             },
         },
     )
-    changed = False
     if connection.base_url != MUELE_BASE_URL:
         connection.base_url = MUELE_BASE_URL
-        changed = True
-    if connection.status == "error":
-        connection.status = "planned"
-        changed = True
-    if changed:
-        connection.save(update_fields=["base_url", "status", "updated_at"])
+        connection.save(update_fields=["base_url", "updated_at"])
     return connection
 
 

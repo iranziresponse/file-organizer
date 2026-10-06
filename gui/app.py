@@ -27,10 +27,9 @@ _single_instance_mutex = None
 
 
 def _focus_existing_instance():
-    """Bring the already-running Orch window to the front. Its title is
-    "Orch" from creation (see OrchMainWindow.__init__) and FindWindowW
-    matches hidden windows too, so this works even before that instance has
-    shown its window."""
+    """Bring the ready Orch window to the front. The main window is titled
+    "Orch" only after its first dashboard page loads, so a second launch
+    cannot reveal its blank startup surface."""
     if sys.platform != "win32":
         return
     try:
@@ -178,8 +177,7 @@ def main():
         # itself redirects to the setup checklist or the dashboard,
         # whichever is right for this profile -- one URL load covers both
         # cases instead of a second navigation call here.
-        tray.main_window.open_path("desktop-shell/")
-        tray._open_main_window()
+        tray.main_window.open_path("desktop-shell/", show_after_load=True)
 
     threading.Thread(target=_open_at_startup, daemon=True).start()
 

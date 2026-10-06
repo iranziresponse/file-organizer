@@ -17,9 +17,11 @@
 
 (function () {
     var VISIBLE_COUNT = 3;
-    document.querySelectorAll('.feature-grid').forEach(function (grid) {
+    document.querySelectorAll('.feature-grid').forEach(function (grid, index) {
         var cards = Array.prototype.slice.call(grid.querySelectorAll('.feature-card'));
         if (cards.length <= VISIBLE_COUNT) return;
+
+        if (!grid.id) grid.id = 'feature-grid-' + (index + 1);
 
         var extra = cards.slice(VISIBLE_COUNT);
         extra.forEach(function (card) { card.hidden = true; });
@@ -30,11 +32,15 @@
         button.className = 'btn btn-ghost feature-grid-toggle mt-16';
         button.textContent = 'Show ' + moreCount + ' more';
         button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-controls', grid.id);
         grid.insertAdjacentElement('afterend', button);
 
         button.addEventListener('click', function () {
             var expanded = button.getAttribute('aria-expanded') === 'true';
-            extra.forEach(function (card) { card.hidden = expanded; });
+            extra.forEach(function (card) {
+                card.hidden = expanded;
+                if (!expanded) card.classList.add('is-visible');
+            });
             button.setAttribute('aria-expanded', String(!expanded));
             button.textContent = expanded ? 'Show ' + moreCount + ' more' : 'Show fewer';
         });

@@ -13,7 +13,7 @@
         <a class="button button-ghost" href="{% url 'study_home' %}">Back to Learning</a>
     </section>
 
-    {% if connection.status == "connected" %}
+    {% if muele_connected %}
     <section class="card compact-card">
         <div class="card-header">
             <div>
@@ -108,9 +108,18 @@
         </form>
     </section>
 
-    {% if connection.status == "connected" %}
+    {% if muele_connected %}
                     </div>
                 </details>
+            </div>
+        </div>
+    </section>
+    {% elif connection.status == "error" %}
+    <section class="card compact-card">
+        <div class="card-header">
+            <div>
+                <h2>MUELE needs attention</h2>
+                <p class="card-subtitle">The saved account could not be verified. Reconnect to restore course sync.</p>
             </div>
         </div>
     </section>
