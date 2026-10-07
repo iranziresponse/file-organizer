@@ -77,6 +77,34 @@ class UserFacingCopyContractTests(SimpleTestCase):
         self.assertIn("without inventing", content)
 
 
+class ThemeAndControlContractTests(SimpleTestCase):
+    def test_dark_mode_is_default_without_overriding_saved_preferences(self):
+        base_template = (TEMPLATE_ROOT / "organizer" / "base.html").read_text(encoding="utf-8")
+        theme_script = (
+            PROJECT_ROOT / "organizer" / "static" / "organizer" / "js" / "topbar-behavior.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "saved === 'light' || saved === 'dark' ? saved : 'dark'",
+            base_template,
+        )
+        self.assertIn(
+            "apply(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');",
+            theme_script,
+        )
+
+    def test_ghost_buttons_keep_visible_hover_feedback_in_both_themes(self):
+        stylesheet = (
+            PROJECT_ROOT / "organizer" / "static" / "organizer" / "css" / "orch.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(".app-shell .button-ghost:hover", stylesheet)
+        self.assertIn("background: var(--green-soft) !important;", stylesheet)
+        self.assertIn("color: var(--orch-ink) !important;", stylesheet)
+        self.assertIn("--orch-link-hover: #23683a;", stylesheet)
+        self.assertIn("color: var(--orch-link-hover);", stylesheet)
+
+
 class StudyNavigationContractTests(SandboxedPathsTestCase):
     def test_study_page_links_to_resource_radar_and_learning_routes(self):
         self.make_profile()

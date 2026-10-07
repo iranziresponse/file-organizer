@@ -334,6 +334,18 @@ class DashboardViewTests(SandboxedPathsTestCase):
         self.assertContains(response, "Plain status view")
         self.assertContains(response, "Downloads folder")
 
+    def test_dashboard_shows_a_bounded_glance_of_workspace_tools(self):
+        self.make_profile()
+
+        response = self.client.get(reverse("dashboard"))
+
+        tool_items = response.context["dashboard_tool_items"]
+        self.assertTrue(tool_items)
+        self.assertLessEqual(len(tool_items), 4)
+        self.assertContains(response, "Your tools, at a glance")
+        self.assertEqual(response.content.count(b"data-tool-glance-item"), len(tool_items))
+        self.assertNotIn("Downloads watcher", {item["name"] for item in tool_items})
+
     def test_dashboard_priority_deck_has_no_duplicate_signals(self):
         # "Academic priority" duplicated the top dashboard panel right
         # above it, and "Safety layer" duplicated the file-watcher tile

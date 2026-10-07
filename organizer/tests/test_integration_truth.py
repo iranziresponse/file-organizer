@@ -4,7 +4,7 @@ from unittest import mock
 from django.urls import reverse
 from django.utils import timezone
 
-from organizer.core import muele_api, muele_sync
+from organizer.core import drive_api, muele_api, muele_sync
 from organizer.models import AppSettings, IntegrationConnection, MueleCourse
 from organizer.views.dashboard import _service_mesh_context
 from organizer.views.integrations import _publishing_ready
@@ -169,6 +169,116 @@ class MueleConnectionSaveTests(SandboxedPathsTestCase):
 
 
 class ConnectionStatusTruthTests(SandboxedPathsTestCase):
+    def test_connections_page_only_shows_supported_services_and_compact_actions(self):
+        self.make_profile(setup_path="makerere")
+
+        response = self.client.get(reverse("connections_home"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Connect the tools you use")
+        self.assertNotContains(response, "What this helps with")
+        self.assertNotContains(response, "Moodle")
+        self.assertNotContains(response, "Calendar")
+        self.assertNotContains(response, "Notion")
+        self.assertNotContains(response, "LinkedIn")
+        self.assertNotContains(response, "Next move")
+
+    def test_drive_status_matches_linked_account_state(self):
+        self.make_profile()
+        IntegrationConnection.objects.create(
+            profile=None,
+            provider="drive",
+            display_name="Google Drive",
+            config={"email": "student@example.test"},
+        )
+
+        with mock.patch.object(drive_api, "load_drive_config", return_value={
+            "enabled": True,
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+        }), mock.patch.object(drive_api, "is_connected", return_value=True):
+            response = self.client.get(reverse("connections_home"))
+
+        drive = next(
+            card
+            for group in response.context["groups"]
+            for card in group["cards"]
+            if card["title"] == "Google Drive Backup"
+        )
+        self.assertEqual(drive["status"], "connected")
+        self.assertEqual(drive["status_label"], "Account linked")
+
+    def test_timetable_requires_a_successful_sync_before_showing_connected(self):
+        profile = self.make_profile(setup_path="makerere")
+        IntegrationConnection.objects.create(
+            profile=profile,
+            provider="mak_timetable",
+            display_name="Makerere Timetable",
+            status="connected",
+            config={"group": "SE-2"},
+        )
+
+        response = self.client.get(reverse("connections_home"))
+        timetable = next(
+            card
+            for group in response.context["groups"]
+            for card in group["cards"]
+            if card["title"] == "Makerere Timetable"
+        )
+
+        self.assertEqual(timetable["status"], "saved")
+        self.assertEqual(timetable["status_label"], "Saved · not verified")
+
+    def test_configured_connections_are_collapsed_until_the_user_opens_them(self):
+        profile = self.make_profile(setup_path="makerere")
+        now = timezone.now()
+        IntegrationConnection.objects.create(
+            profile=profile,
+            provider="muele",
+            display_name="Makerere MUELE",
+            username="student",
+            status="connected",
+            last_sync_at=now,
+        )
+        IntegrationConnection.objects.create(
+            profile=profile,
+            provider="mak_timetable",
+            display_name="Makerere Timetable",
+            status="connected",
+            last_sync_at=now,
+            config={"group": "SE-2"},
+        )
+
+        with mock.patch.object(muele_api, "load_connection_token", return_value="verified-token"):
+            response = self.client.get(reverse("connections_home"))
+
+        self.assertContains(response, "Needs setup or attention")
+        self.assertContains(response, "Ready and optional")
+        self.assertContains(response, 'class="connections-configured"')
+        self.assertNotContains(response, 'class="connections-configured" open')
+        self.assertContains(response, "Manage courses")
+
+    def test_connected_muele_without_a_successful_check_is_attention_not_ready(self):
+        profile = self.make_profile(setup_path="makerere")
+        IntegrationConnection.objects.create(
+            profile=profile,
+            provider="muele",
+            display_name="Makerere MUELE",
+            status="connected",
+        )
+
+        with mock.patch.object(muele_api, "load_connection_token", return_value="stale-token"):
+            response = self.client.get(reverse("connections_home"))
+
+        muele = next(
+            card
+            for group in response.context["groups"]
+            for card in group["cards"]
+            if card["title"] == "Makerere MUELE"
+        )
+        self.assertEqual(muele["status"], "error")
+        self.assertEqual(muele["status_label"], "Needs attention")
+
     def test_folder_watcher_is_not_active_when_a_watched_folder_is_unwritable(self):
         self.make_profile()
         app_settings = AppSettings.get_solo()

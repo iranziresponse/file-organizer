@@ -274,9 +274,9 @@ class StudyViewsTests(SandboxedPathsTestCase):
         self.assertEqual(connection.provider, "muele")
         self.assertEqual(connection.base_url, study.MUELE_BASE_URL)
 
-    def test_muele_connection_page_saves_metadata_without_secret(self):
+    def test_legacy_muele_setup_page_redirects_to_the_real_connection_flow(self):
         profile = self.make_profile(name="Computer Science - Makerere University")
-        study.ensure_makerere_connection(profile)
+        connection = study.ensure_makerere_connection(profile)
 
         response = self.client.post(reverse("muele_connection"), {
             "base_url": study.MUELE_BASE_URL,
@@ -285,8 +285,8 @@ class StudyViewsTests(SandboxedPathsTestCase):
             "sync_targets": ["course_files", "assignments"],
         })
 
-        self.assertRedirects(response, reverse("study_home"))
-        connection = IntegrationConnection.objects.get(profile=profile, provider="muele")
-        self.assertEqual(connection.username, "student@mak.ac.ug")
+        self.assertRedirects(response, reverse("muele_connect"))
+        connection.refresh_from_db()
+        self.assertEqual(connection.username, "")
         self.assertEqual(connection.token_reference, "")
-        self.assertEqual(connection.config["college"], "COCIS")
+        self.assertEqual(connection.status, "planned")

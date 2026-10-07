@@ -9,6 +9,7 @@
     --orch-lime: #b8ed55;
     --orch-lime-ink: #172313;
     --orch-green: #69c779;
+    --orch-link-hover: var(--orch-lime);
     --orch-radius: 14px;
     --orch-chrome: #14221b;
     --orch-chrome-line: #26382c;
@@ -47,6 +48,7 @@ html[data-theme="light"] {
     --orch-ink: #172923;
     --orch-muted: #50665b;
     --orch-green: #267a45;
+    --orch-link-hover: #23683a;
     --orch-chrome: #e8ede4;
     --orch-chrome-line: transparent;
     --orch-chrome-ink: #263b30;
@@ -675,7 +677,7 @@ table tbody tr:hover {
 }
 
 .app-shell a:not(.button):not(.app-sidebar-link):not(.nav a):hover {
-    color: var(--orch-lime);
+    color: var(--orch-link-hover);
 }
 
 /* Shared app controls use one clear hierarchy: filled primary, quiet
@@ -722,6 +724,22 @@ table tbody tr:hover {
     background: transparent !important;
 }
 
+.app-shell .button-ghost:hover,
+.app-shell button.button-ghost:hover,
+.app-shell .ghost-button:hover {
+    border-color: var(--orch-green) !important;
+    background: var(--green-soft) !important;
+    color: var(--orch-ink) !important;
+    box-shadow: 0 4px 12px rgba(38, 122, 69, 0.1) !important;
+}
+
+.app-shell .focus-card .button-ghost:hover {
+    border-color: rgba(23, 35, 19, 0.38) !important;
+    background: rgba(255, 255, 255, 0.38) !important;
+    color: var(--orch-lime-ink) !important;
+    box-shadow: none !important;
+}
+
 .app-shell .button-danger,
 .app-shell button.button-danger {
     border-color: var(--danger-border) !important;
@@ -765,6 +783,60 @@ table tbody tr:hover {
 .app-shell .card:focus-within,
 .app-shell .connection-card:focus-within {
     border-color: var(--orch-green) !important;
+}
+
+.app-shell .tool-glance {
+    gap: 9px;
+    border-color: var(--orch-line);
+    background:
+        radial-gradient(ellipse at 100% 0, rgba(105, 199, 121, 0.07), transparent 42%),
+        var(--orch-surface);
+}
+
+.app-shell .tool-glance__heading h2 {
+    color: var(--orch-ink);
+}
+
+.app-shell .tool-glance__heading > a {
+    color: var(--orch-green);
+}
+
+.app-shell .tool-glance__heading > a:hover {
+    color: var(--orch-link-hover);
+}
+
+.app-shell .tool-glance__item {
+    border-color: var(--orch-line);
+    background: var(--orch-surface-raised);
+    color: var(--orch-ink);
+}
+
+.app-shell .tool-glance__item:hover,
+.app-shell .tool-glance__item:focus-visible {
+    border-color: var(--orch-green);
+    background: var(--orch-chrome-hover);
+    color: var(--orch-ink) !important;
+}
+
+.app-shell .tool-glance__copy strong {
+    color: var(--orch-ink);
+}
+
+.app-shell .tool-glance__copy > span,
+.app-shell .tool-glance__status {
+    color: var(--orch-muted);
+}
+
+.app-shell .tool-glance__item.is-warning .tool-glance__status {
+    color: var(--warning-text);
+}
+
+.app-shell .tool-glance__item.is-live .tool-glance__status {
+    color: var(--success-text);
+}
+
+.app-shell .tool-glance__item.is-saved .tool-glance__status {
+    color: var(--orch-green);
 }
 
 .workspace-controller {
@@ -904,6 +976,310 @@ table tbody tr:hover {
 
 .focus-card__actions form {
     margin: 0;
+}
+
+.connections-page {
+    gap: 18px;
+}
+
+.connections-intro {
+    padding: 26px 28px;
+    border: 1px solid var(--orch-line);
+    border-radius: 20px;
+    background:
+        radial-gradient(ellipse at 100% 0, rgba(105, 199, 121, 0.1), transparent 42%),
+        var(--orch-surface);
+}
+
+.connections-intro h2 {
+    margin: 5px 0 8px;
+    color: var(--orch-ink);
+    font-size: clamp(28px, 3vw, 36px);
+    letter-spacing: -0.05em;
+}
+
+.connections-intro p {
+    max-width: 680px;
+    margin: 0;
+    color: var(--orch-muted);
+    line-height: 1.65;
+}
+
+.connections-intro p a {
+    color: var(--orch-green);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.connections-page .connection-group {
+    gap: 12px;
+}
+
+.connections-page .connection-group-header {
+    align-items: baseline;
+}
+
+.connections-page .connection-group-header h2 {
+    margin: 0;
+    color: var(--orch-ink);
+    font-size: 19px;
+    letter-spacing: -0.03em;
+}
+
+.connections-page .connection-group-header h3 {
+    margin: 0;
+    color: var(--orch-ink);
+    font-size: 15px;
+    letter-spacing: -0.02em;
+}
+
+.connections-page .connection-group-header p {
+    margin: 4px 0 0;
+    color: var(--orch-muted);
+    font-size: 13px;
+}
+
+.connections-page .connection-grid {
+    gap: 12px;
+}
+
+.connections-page .connection-card {
+    min-height: 0;
+    gap: 12px;
+    padding: 17px;
+    border-color: var(--orch-line);
+    border-radius: 15px;
+    background: var(--orch-surface);
+    box-shadow: none;
+}
+
+.connections-page .connection-card-head {
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.connections-page .connection-card-head h3 {
+    margin: 0;
+    color: var(--orch-ink);
+    font-size: 15px;
+    letter-spacing: -0.02em;
+}
+
+.connections-page .connection-card > p {
+    flex: 1;
+    margin: 0;
+    color: var(--orch-muted);
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.connections-page .connection-footer {
+    justify-content: flex-start;
+    margin-top: auto;
+    padding-top: 2px;
+}
+
+.connections-page .connection-footer .button {
+    min-height: 36px;
+    padding: 7px 12px;
+    font-size: 12px;
+}
+
+.connections-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border: 1px solid var(--warning-text);
+    border-radius: 15px;
+    background: var(--orch-surface);
+}
+
+.connections-alert h2 {
+    margin: 0;
+    color: var(--orch-ink);
+    font-size: 15px;
+}
+
+.connections-alert p {
+    margin: 4px 0 0;
+    color: var(--orch-muted);
+    font-size: 13px;
+}
+
+.connections-alert .help-text {
+    flex-basis: 100%;
+}
+
+.connections-action-area {
+    display: grid;
+    gap: 16px;
+}
+
+.connections-section-heading h2 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 5px 0 4px;
+    color: var(--orch-ink);
+    font-size: 19px;
+    letter-spacing: -0.03em;
+}
+
+.connections-section-heading h2 span,
+.connections-configured__count {
+    display: inline-grid;
+    min-width: 24px;
+    height: 24px;
+    place-items: center;
+    padding: 0 7px;
+    border: 1px solid var(--orch-line);
+    border-radius: 99px;
+    background: var(--orch-surface-raised);
+    color: var(--orch-green);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.connections-section-heading p,
+.connections-configured__groups .connection-group-header p {
+    margin: 0;
+    color: var(--orch-muted);
+    font-size: 13px;
+}
+
+.connections-action-area .connection-group,
+.connections-configured__groups .connection-group {
+    gap: 9px;
+}
+
+.connections-configured {
+    overflow: hidden;
+    border: 1px solid var(--orch-line);
+    border-radius: 16px;
+    background: var(--orch-surface);
+}
+
+.connections-configured > summary {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    align-items: center;
+    gap: 11px;
+    min-height: 62px;
+    padding: 13px 17px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.connections-configured > summary::-webkit-details-marker {
+    display: none;
+}
+
+.connections-configured > summary::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-right: 1.5px solid var(--orch-muted);
+    border-bottom: 1.5px solid var(--orch-muted);
+    transform: rotate(45deg) translateY(-2px);
+    transition: transform 140ms ease;
+}
+
+.connections-configured[open] > summary::after {
+    transform: rotate(225deg) translate(-2px, -1px);
+}
+
+.connections-configured > summary:hover,
+.connections-configured > summary:focus-visible {
+    background: var(--orch-surface-raised);
+    outline: none;
+}
+
+.connections-configured__title {
+    color: var(--orch-ink);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.connections-configured__hint {
+    color: var(--orch-muted);
+    font-size: 12px;
+}
+
+.connections-configured__groups {
+    display: grid;
+    gap: 17px;
+    padding: 4px 17px 17px;
+    border-top: 1px solid var(--orch-line);
+}
+
+.connections-configured__groups .connection-group {
+    padding-top: 13px;
+}
+
+.connections-all-clear {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 17px 19px;
+    border: 1px solid var(--green-border);
+    border-radius: 15px;
+    background: var(--green-soft);
+}
+
+.connections-all-clear__mark {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--orch-green);
+    color: var(--orch-surface);
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.connections-all-clear h2 {
+    margin: 0;
+    color: var(--orch-ink);
+    font-size: 15px;
+}
+
+.connections-all-clear p {
+    margin: 4px 0 0;
+    color: var(--orch-muted);
+    font-size: 13px;
+}
+
+@media (max-width: 760px) {
+    .connections-intro {
+        padding: 21px;
+    }
+
+    .connections-page .connection-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .connections-alert {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .connections-configured > summary {
+        grid-template-columns: auto auto 1fr auto;
+        gap: 7px;
+        padding-inline: 12px;
+    }
+
+    .connections-configured__hint {
+        grid-column: 1 / -1;
+    }
+
+    .connections-configured__groups {
+        padding-inline: 12px;
+    }
 }
 
 .focus-card__actions .button {

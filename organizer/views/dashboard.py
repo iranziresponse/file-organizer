@@ -978,6 +978,7 @@ def _cockpit_context(request, profile, events, last_move, controller_pulse=None)
     next_action = _next_best_action(profile, now, start, end)
     pending_inbox_count = SortDecision.objects.filter(profile=profile, status="pending").count() if profile else 0
     service_mesh = _service_mesh_context(profile, app_status_items, pending_decisions=pending_inbox_count)
+    dashboard_tool_items = _dashboard_tool_items(service_mesh)
     controller_unread_count = Notification.objects.filter(
         Q(profile=profile) | Q(profile__isnull=True), read_at__isnull=True
     ).count() if profile and controller_pulse is not None else 0
@@ -1013,6 +1014,7 @@ def _cockpit_context(request, profile, events, last_move, controller_pulse=None)
         "app_status_items": app_status_items,
         "health_items": app_status_items,
         "service_mesh": service_mesh,
+        "dashboard_tool_items": dashboard_tool_items,
         "controller_items": _workspace_controller(
             profile,
             now,
@@ -1025,6 +1027,19 @@ def _cockpit_context(request, profile, events, last_move, controller_pulse=None)
         "command_items": _command_items(profile, next_action),
         **_focus_context(profile),
     }
+
+
+def _dashboard_tool_items(service_mesh):
+    """Pick the highest-priority tool statuses for the dashboard."""
+    state_priority = {"warning": 0, "live": 1, "saved": 2, "muted": 3}
+    items = [
+        item
+        for lane in service_mesh["lanes"]
+        if lane["title"] != "Profile sorting"
+        for item in lane["items"]
+    ]
+    items.sort(key=lambda item: state_priority[item["state"]])
+    return items[:4]
 
 
 def _workspace_controller(profile, now=None, pulse_snapshot=None, unread_count=None):

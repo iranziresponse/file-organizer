@@ -257,44 +257,7 @@ def study_home(request):
 
 
 def muele_connection(request):
-    profile = Profile.get_active()
-    if not profile:
-        messages.error(request, "Create or activate a Makerere profile first.")
-        return redirect("start")
-
-    connection = study.ensure_makerere_connection(profile)
-    if connection is None:
-        connection = IntegrationConnection.objects.create(
-            profile=profile,
-            provider="muele",
-            display_name="Makerere MUELE",
-            base_url=study.MUELE_BASE_URL,
-            status="planned",
-            config={
-                "platform": "Moodle",
-                "sync_targets": ["course_files", "assignments", "calendar"],
-            },
-        )
-
-    if request.method == "POST":
-        connection.username = request.POST.get("username", "").strip()
-        connection.base_url = request.POST.get("base_url", "").strip() or study.MUELE_BASE_URL
-        connection.status = "planned"
-        connection.config = {
-            **(connection.config or {}),
-            "college": request.POST.get("college", "").strip(),
-            "sync_targets": request.POST.getlist("sync_targets") or ["course_files", "assignments", "calendar"],
-            "next_step": "Add secure credential storage and Moodle web service sync.",
-        }
-        connection.save()
-        messages.success(request, "MUELE connection details saved.")
-        return redirect("study_home")
-
-    return render(request, "organizer/muele_connection.html", {
-        "profile": profile,
-        "connection": connection,
-        "muele_url": study.MUELE_BASE_URL,
-    })
+    return redirect("muele_connect")
 
 
 

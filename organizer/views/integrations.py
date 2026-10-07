@@ -181,7 +181,10 @@ def _connection_card(
     action=None,
     meta="",
     scope="",
+    requires_action=None,
 ):
+    if requires_action is None:
+        requires_action = status in {"add", "setup", "needs_key", "error", "blocked"}
     return {
         "title": title,
         "area": area,
@@ -193,6 +196,7 @@ def _connection_card(
         "action": action,
         "meta": meta,
         "scope": scope,
+        "requires_action": requires_action,
     }
 
 
@@ -215,12 +219,7 @@ def _publishing_needs_key(channels):
 
 @perf.measure_view
 def connections_home(request):
-    """Unified service map for everything Orch can connect to.
-
-    The individual setup flows still live where they already did. This page
-    is the user's map: what is connected, what needs setup, what is optional,
-    and why taking the next action is worth it.
-    """
+    """Show supported connections with concise, evidence-based states."""
     from ..core import ai_classify, diagnostics, drive_api, muele_api, youtube_api
 
     profile = Profile.get_active()
@@ -241,25 +240,40 @@ def connections_home(request):
     muele_needs_attention = bool(
         muele and (
             muele.status == "error"
-            or (muele.status == "connected" and not muele_token_available)
+            or (
+                muele.status == "connected"
+                and (not muele_token_available or not muele.last_sync_at)
+            )
         )
     )
     timetable = connection("mak_timetable")
     timetable_entries = TimetableEntry.objects.filter(profile=profile).count() if profile else 0
-    muele_saved = bool(muele and muele.status == "connected" and muele_token_available)
-    timetable_saved = bool(timetable and timetable.status == "connected")
     timetable_configured = _has_saved_timetable(timetable)
+    muele_saved = bool(
+        muele
+        and muele.status == "connected"
+        and muele_token_available
+        and muele.last_sync_at
+    )
+    timetable_saved = bool(
+        timetable
+        and timetable.status == "connected"
+        and timetable_configured
+        and timetable.last_sync_at
+    )
     ai_config = ai_classify.load_ai_config() or {}
     youtube_config = youtube_api.load_youtube_config() or {}
     drive_config = drive_api.load_drive_config() or {}
     drive_connection = global_connection("drive")
     drive_email = drive_connection.config.get("email") if drive_connection and drive_connection.config else ""
-    drive_ready = bool(drive_config.get("enabled") and drive_config.get("client_id") and drive_config.get("client_secret"))
-    drive_linked = bool(drive_ready and drive_api.is_connected())
+    drive_configured = bool(drive_config.get("client_id") and drive_config.get("client_secret"))
+    drive_enabled = bool(drive_config.get("enabled"))
+    drive_token_available = drive_api.is_connected()
+    drive_ready = bool(drive_enabled and drive_configured)
+    drive_linked = bool(drive_ready and drive_token_available)
 
     custom_channels = profile_connections.filter(provider="custom_website")
     github_channels = profile_connections.filter(provider="github")
-    linkedin = connection("linkedin")
     active_categories = GlobalSortCategory.objects.exclude(key="sensitive").filter(enabled=True).count()
 
     has_profile = bool(profile)
@@ -274,13 +288,21 @@ def connections_home(request):
             status="connected" if muele_saved else "error" if muele_needs_attention else "setup" if has_profile and learning_profile else "not_connected" if has_profile else "blocked",
             status_label="Connected" if muele_saved else "Needs attention" if muele_needs_attention else "Set up" if has_profile and learning_profile else "Optional" if has_profile else "Needs profile",
             detail=(
-                f"Connected as {muele.username}" if muele_saved and muele.username
-                else f"Last successful sync {_short_timesince(muele.last_sync_at)}." if muele_saved and muele and muele.last_sync_at
+                f"Connected as {muele.username}; last verified {_short_timesince(muele.last_sync_at)}." if muele_saved and muele.username
+                else f"Account linked; last verified {_short_timesince(muele.last_sync_at)}." if muele_saved
                 else f"Connection needs attention; last successful sync {_short_timesince(muele.last_sync_at)}." if muele_needs_attention
                 else "Bring in course files, assignment dates, and learning activity when this profile needs it."
             ),
-            reason="Useful for Makerere profiles. Other profiles can ignore it and still use Orch normally.",
-            action=_connection_action(reverse("muele_courses") if muele_saved else reverse("muele_connect") if has_profile else profile_setup_url, "Manage" if muele_saved else "Set up" if has_profile else "Create profile"),
+            reason="Sync Makerere course files, assignments, and deadlines.",
+            action=_connection_action(
+                reverse("muele_courses") if muele_saved
+                else reverse("muele_connect") if has_profile
+                else profile_setup_url,
+                "Manage courses" if muele_saved
+                else "Reconnect" if muele_needs_attention
+                else "Connect" if has_profile
+                else "Create profile",
+            ),
             meta=f"Last sync {_short_timesince(muele.last_sync_at)}" if muele and muele.last_sync_at else "Makerere",
             scope=profile.name if profile else "No active profile",
         ),
@@ -290,34 +312,13 @@ def connections_home(request):
             status="connected" if timetable_saved else "error" if timetable and timetable.status == "error" else "saved" if timetable_configured else "setup" if has_profile and learning_profile else "not_connected" if has_profile else "blocked",
             status_label="Connected" if timetable_saved else "Needs attention" if timetable and timetable.status == "error" else "Saved · not verified" if timetable_configured else "Set up" if has_profile and learning_profile else "Optional" if has_profile else "Needs profile",
             detail=f"{timetable_entries} timetable entries synced." if timetable_saved and timetable_entries else f"Timetable sync succeeded; no entries are currently listed. Last sync {_short_timesince(timetable.last_sync_at)}." if timetable_saved else f"Last sync failed for {timetable.config.get('group')}; retry to confirm the current timetable." if timetable and timetable.status == "error" and timetable_configured else f"Saved for {timetable.config.get('group')}; waiting for a successful sync." if timetable_configured else "Add a timetable for classes, sessions, tests, exams, or training times.",
-            reason="Useful when this profile has time-based work. It should not be required for ordinary file sorting.",
+            reason="Bring Makerere classes, tests, and exams into your timetable.",
             action=_connection_action(reverse("timetable_view") if timetable_saved else reverse("timetable_connect") if has_profile else profile_setup_url, "View" if timetable_saved else "Retry sync" if timetable_configured else "Set up" if has_profile else "Create profile"),
             meta=timetable.config.get("group", "") if timetable and timetable.config else "Timetable",
             scope=profile.name if profile else "No active profile",
+            requires_action=not timetable_saved,
         ),
-        _connection_card(
-            title="Moodle",
-            area="Learning platform",
-            status="not_connected",
-            status_label="Not connected",
-            detail="Generic Moodle support is planned after the Makerere MUELE flow is stable.",
-            reason="Useful for profiles that use Moodle, but it should stay optional until the connector is ready.",
-            action=None,
-            meta="Planned",
-            scope="Future",
-        ),
-        _connection_card(
-            title="Calendar",
-            area="Schedule bridge",
-            status="not_connected",
-            status_label="Not connected",
-            detail="Calendar sync is not wired yet; Orch currently uses timetable and assignments internally.",
-            reason="The right future version should push dated items to your calendar only after approval.",
-            action=None,
-            meta="Planned",
-            scope="Future",
-        ),
-    ]
+    ] if learning_profile else []
 
     helper_cards = [
         _connection_card(
@@ -342,17 +343,6 @@ def connections_home(request):
             meta="Optional",
             scope="App-wide",
         ),
-        _connection_card(
-            title="GitHub Repo Search",
-            area="Code resources",
-            status="available",
-            status_label="Available",
-            detail="Public-repo search needs no GitHub account; requests are checked when you search.",
-            reason="Useful when a topic needs real code examples to inspect.",
-            action=_connection_action(reverse("resource_radar"), "Open"),
-            meta="No key required",
-            scope="App-wide",
-        ),
     ]
 
     app_settings = AppSettings.get_solo()
@@ -366,20 +356,43 @@ def connections_home(request):
         for folder in watched_folders
     )
     watcher_running = bool(diagnostics.get_watcher_status().get("running") and folders_ready)
+    if drive_linked:
+        drive_status = "connected"
+        drive_status_label = "Account linked"
+        drive_detail = (
+            f"Connected{f' as {drive_email}' if drive_email else ''}. Access is checked when a backup runs."
+        )
+        drive_action = _connection_action(reverse("settings_edit"), "Manage")
+    elif drive_token_available and not drive_configured:
+        drive_status = "error"
+        drive_status_label = "Needs attention"
+        drive_detail = "A Drive account token exists, but the Google app credentials are missing."
+        drive_action = _connection_action(reverse("settings_edit"), "Fix setup")
+    elif drive_configured and not drive_enabled:
+        drive_status = "saved"
+        drive_status_label = "Paused"
+        drive_detail = "Google credentials are saved, but Drive backup is turned off."
+        drive_action = _connection_action(reverse("settings_edit"), "Manage")
+    elif drive_ready:
+        drive_status = "setup"
+        drive_status_label = "Ready to connect"
+        drive_detail = "Google credentials are ready. Link your Google account to enable backups."
+        drive_action = _connection_action(reverse("drive_connect"), "Connect")
+    else:
+        drive_status = "add"
+        drive_status_label = "Not set up"
+        drive_detail = "Add your Google Client ID and secret in Settings before connecting."
+        drive_action = _connection_action(reverse("settings_edit"), "Set up")
+
     storage_cards = [
         _connection_card(
             title="Google Drive Backup",
             area="Cloud backup",
-            status="saved" if drive_linked else "saved" if drive_ready else "add",
-            status_label="Account linked · checked on backup" if drive_linked else "Ready to connect" if drive_ready else "Add",
-            detail=(
-                f"Account token stored{f' for {drive_email}' if drive_email else ''}; access is checked on backup."
-                if drive_linked else
-                "Google credentials saved; connect the account." if drive_ready else
-                "Client ID and secret not configured."
-            ),
-            reason="Keeps sorted files recoverable while preserving Orch's local-first design.",
-            action=_connection_action(reverse("drive_connect") if drive_ready and not drive_linked else reverse("settings_edit"), "Connect" if drive_ready and not drive_linked else "Manage" if drive_linked else "Add"),
+            status=drive_status,
+            status_label=drive_status_label,
+            detail=drive_detail,
+            reason="Back up sorted files to your own Google Drive.",
+            action=drive_action,
             meta="App-wide",
             scope="Backup",
         ),
@@ -389,21 +402,10 @@ def connections_home(request):
             status="connected" if watcher_running else "error" if app_settings.downloads_path else "setup",
             status_label="Active" if watcher_running else "Not running" if app_settings.downloads_path else "Set up",
             detail=f"Watching {app_settings.downloads_path}." if watcher_running else f"Configured for {app_settings.downloads_path}, but its folders or heartbeat need attention." if app_settings.downloads_path else "Choose a downloads folder to start local sorting.",
-            reason="This is Orch's core engine: files arrive locally, then rules and profiles decide what happens.",
+            reason="Watches your Downloads folder and applies your sorting rules.",
             action=_connection_action(reverse("settings_edit"), "Tune"),
             meta=f"{active_categories} optional categor{'ies' if active_categories != 1 else 'y'} on",
             scope="App-wide",
-        ),
-        _connection_card(
-            title="Notion",
-            area="Workspace export",
-            status="not_connected",
-            status_label="Not connected",
-            detail="No Notion connector is implemented yet.",
-            reason="Good future target for workspace notes, but it needs a clean permission model before it belongs in Orch.",
-            action=None,
-            meta="Planned",
-            scope="Future",
         ),
     ]
 
@@ -418,28 +420,19 @@ def connections_home(request):
             action=_connection_action(publishing_url, "Manage" if custom_channels.exists() else "Add" if has_profile else "Create profile"),
             meta="User-owned API",
             scope=profile.name if profile else "No active profile",
+            requires_action=not _publishing_ready(custom_channels),
         ),
         _connection_card(
             title="GitHub Publishing",
             area="Publishing",
-            status="connected" if _publishing_ready(github_channels) else "saved" if github_channels.exists() else "add",
+            status="connected" if _publishing_ready(github_channels) else "needs_key" if _publishing_needs_key(github_channels) else "saved" if github_channels.exists() else "add",
             status_label="Connected" if _publishing_ready(github_channels) else "Needs token" if _publishing_needs_key(github_channels) else "Saved" if github_channels.exists() else "Add",
             detail=f"{github_channels.count()} repo channel{'s' if github_channels.count() != 1 else ''} configured." if github_channels.exists() else "Publish approved posts as commits to a repo.",
             reason="Useful when you want approved drafts to become dated commits in a repo you own.",
             action=_connection_action(publishing_url, "Manage" if github_channels.exists() else "Add" if has_profile else "Create profile"),
             meta="Repo commits",
             scope=profile.name if profile else "No active profile",
-        ),
-        _connection_card(
-            title="LinkedIn",
-            area="Publishing",
-            status="not_connected" if not linkedin else linkedin.status,
-            status_label="Not connected" if not linkedin else linkedin.get_status_display(),
-            detail="OAuth publishing is not connected. Orch will never ask for your LinkedIn password.",
-            reason="The right flow is: Orch suggests a draft, then you click to approve and publish through an official channel.",
-            action=_connection_action(publishing_url, "Read setup note" if has_profile else "Create profile"),
-            meta="OAuth required",
-            scope="Future channel",
+            requires_action=not _publishing_ready(github_channels),
         ),
         _connection_card(
             title="Markdown / HTML Export",
@@ -455,19 +448,23 @@ def connections_home(request):
     ]
 
     groups = [
-        {"title": "Learning tools", "detail": "Optional course, timetable, review, and resource helpers.", "cards": academic_cards},
-        {"title": "Extra help", "detail": "Optional services for summaries, writing, and better recommendations.", "cards": helper_cards},
-        {"title": "Storage and workspace", "detail": "Where Orch watches, backs up, or may export your work.", "cards": storage_cards},
-        {"title": "Publishing", "detail": "Where approved drafts can go after your click.", "cards": publishing_cards},
+        {"title": "Learning", "detail": "Course materials and your Makerere schedule.", "cards": academic_cards},
+        {"title": "Study helpers", "detail": "Optional services that support summaries and resource recommendations.", "cards": helper_cards},
+        {"title": "Files and backup", "detail": "Local sorting and optional cloud backup.", "cards": storage_cards},
+        {"title": "Publishing", "detail": "Destinations for drafts you choose to publish.", "cards": publishing_cards},
     ]
-    all_cards = [card for group in groups for card in group["cards"]]
-    ready_count = sum(1 for card in all_cards if card["status"] in {"connected", "available"})
-    actionable_count = sum(1 for card in all_cards if card["status"] in {"add", "setup", "saved", "error", "needs_key"})
-    blocked_count = sum(1 for card in all_cards if card["status"] in {"blocked", "not_connected", "planned"})
-    next_action = next((card for card in all_cards if card["status"] == "error"), None) or next(
-        (card for card in all_cards if card["status"] in {"setup", "needs_key", "saved", "add"}), None
-    )
-
+    action_groups = []
+    configured_groups = []
+    action_count = configured_count = 0
+    for group in groups:
+        action_cards = [card for card in group["cards"] if card["requires_action"]]
+        configured_cards = [card for card in group["cards"] if not card["requires_action"]]
+        if action_cards:
+            action_groups.append({**group, "cards": action_cards})
+            action_count += len(action_cards)
+        if configured_cards:
+            configured_groups.append({**group, "cards": configured_cards})
+            configured_count += len(configured_cards)
     failed_backup_count = (
         MoveEvent.objects.filter(profile=profile, drive_backup_status="failed").count() if profile else 0
     )
@@ -475,11 +472,10 @@ def connections_home(request):
     return render(request, "organizer/connections.html", {
         "profile": profile,
         "groups": groups,
-        "ready_count": ready_count,
-        "total_count": len(all_cards),
-        "actionable_count": actionable_count,
-        "blocked_count": blocked_count,
-        "next_action": next_action,
+        "action_groups": action_groups,
+        "configured_groups": configured_groups,
+        "action_count": action_count,
+        "configured_count": configured_count,
         "failed_backup_count": failed_backup_count,
     })
 

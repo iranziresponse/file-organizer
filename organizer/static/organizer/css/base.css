@@ -7527,6 +7527,13 @@ body.has-desktop-titlebar .table-shell table {
     align-items: start;
 }
 
+.dashboard-tier2__main {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 16px;
+}
+
 .focus-card {
     display: flex;
     flex-direction: column;
@@ -7553,6 +7560,110 @@ body.has-desktop-titlebar .table-shell table {
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+.tool-glance {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.tool-glance__heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.tool-glance__heading h2 {
+    margin: 2px 0 0;
+    font-size: var(--fs-lg);
+    line-height: var(--lh-tight);
+}
+
+.tool-glance__heading > a {
+    flex: 0 0 auto;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+}
+
+.tool-glance__intro {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+}
+
+.tool-glance__list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.tool-glance__item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid var(--stroke);
+    border-radius: 10px;
+    background: var(--glass-strong);
+    color: var(--text);
+    text-decoration: none;
+    transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.tool-glance__item:hover,
+.tool-glance__item:focus-visible {
+    border-color: var(--green);
+    background: var(--green-soft);
+    color: var(--text);
+}
+
+.tool-glance__copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.tool-glance__copy strong,
+.tool-glance__copy > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tool-glance__copy strong {
+    font-size: var(--fs-xs);
+}
+
+.tool-glance__copy > span {
+    color: var(--muted);
+    font-size: var(--fs-2xs);
+}
+
+.tool-glance__status {
+    color: var(--muted);
+    font-size: var(--fs-2xs);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.tool-glance__item.is-warning .tool-glance__status {
+    color: var(--warning-text);
+}
+
+.tool-glance__item.is-live .tool-glance__status {
+    color: var(--success-text);
+}
+
+.tool-glance__item.is-saved .tool-glance__status {
+    color: var(--accent-label);
 }
 
 .activity-film__head {

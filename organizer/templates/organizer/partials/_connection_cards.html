@@ -1,0 +1,18 @@
+<div class="connection-grid">
+    {% for card in cards %}
+    <article class="connection-card is-{{ card.status_class }}">
+        <div class="connection-card-head">
+            <h3>{{ card.title }}</h3>
+            <span class="connection-status is-{{ card.status_class }}">{{ card.status_label }}</span>
+        </div>
+        <p>{{ card.detail }}</p>
+        <div class="connection-footer">
+            {% if card.action %}
+            <a class="button {% if card.status == 'connected' %}button-ghost{% else %}button-live{% endif %}" href="{{ card.action.url }}">{{ card.action.label }}</a>
+            {% else %}
+            <span class="path-text">No action available</span>
+            {% endif %}
+        </div>
+    </article>
+    {% endfor %}
+</div>

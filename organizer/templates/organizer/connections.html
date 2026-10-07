@@ -3,116 +3,77 @@
 {% block title %}Connections - Orch{% endblock %}
 
 {% block content %}
-<div class="page-stack page-center page-wide workspace-page">
-    <section class="page-heading connections-hero">
+<div class="page-stack page-center page-wide workspace-page connections-page">
+    <section class="connections-intro">
         <div>
-            <span class="eyebrow">{% if profile %}{{ profile.name }}{% else %}App-wide{% endif %}</span>
+            <span class="eyebrow">{% if profile %}{{ profile.name }} · WORKSPACE{% else %}WORKSPACE{% endif %}</span>
             <h2>Connections</h2>
-            <p>See what Orch can work with, what is already connected, and what is worth adding for this profile. <a href="{% url 'privacy_policy' %}">What does each one send?</a></p>
-            <div class="hero-icon-row" role="list" aria-label="Jump to a connection category">
-                {% for group in groups %}
-                <a class="hero-icon-tip" role="listitem" href="#group-{{ forloop.counter }}" data-tip="{{ group.title }}: {{ group.detail }}">
-                    {% if group.title == "Learning tools" %}
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M12 3 2 8l10 5 10-5-10-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                        <path d="M6 10.5V16c0 1 2.5 3 6 3s6-2 6-3v-5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M22 8v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                    </svg>
-                    {% elif group.title == "Extra help" %}
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M12 3c.6 3.2 2.2 4.8 5.4 5.4-3.2.6-4.8 2.2-5.4 5.4-.6-3.2-2.2-4.8-5.4-5.4C9.8 7.8 11.4 6.2 12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                        <path d="M19 14.5c.3 1.3.9 1.9 2.2 2.2-1.3.3-1.9.9-2.2 2.2-.3-1.3-.9-1.9-2.2-2.2 1.3-.3 1.9-.9 2.2-2.2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-                    </svg>
-                    {% elif group.title == "Storage and workspace" %}
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M7 18a4.5 4.5 0 0 1-.4-8.98A5.5 5.5 0 0 1 17.5 9.5 4 4 0 0 1 17 18H7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                    </svg>
-                    {% else %}
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M22 2 11 13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M22 2 15 22l-4-9-9-4 20-7Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                    {% endif %}
-                    <span class="sr-only">{{ group.title }}</span>
-                </a>
-                {% endfor %}
-            </div>
-        </div>
-        {% if next_action and next_action.action %}
-        <a class="button button-live" href="{{ next_action.action.url }}">{{ next_action.action.label }} {{ next_action.title }}</a>
-        {% endif %}
-    </section>
-
-    <section class="connection-summary-grid" aria-label="Connection summary">
-        <div class="connection-stat">
-            <strong>{{ ready_count }}/{{ total_count }}</strong>
-            <span>Ready</span>
-        </div>
-        <div class="connection-stat">
-            <strong>{{ actionable_count }}</strong>
-            <span>Needs action</span>
-        </div>
-        <div class="connection-stat">
-            <strong>{{ blocked_count }}</strong>
-            <span>Not ready</span>
-        </div>
-        <div class="connection-stat">
-            <strong>{% if next_action %}{{ next_action.status_label }}{% else %}Clear{% endif %}</strong>
-            <span>Next move</span>
+            <p>Connect the tools you use, and manage them in one place. Orch only calls a service connected after its setup has been confirmed. <a href="{% url 'privacy_policy' %}">Privacy details</a></p>
         </div>
     </section>
 
     {% if failed_backup_count %}
-    <section class="card compact-card">
-        <div class="card-header">
-            <div>
-                <h2>{{ failed_backup_count }} Drive backup{{ failed_backup_count|pluralize }} didn't go through</h2>
-                <p class="card-subtitle">Usually unstable internet, an expired token, or Drive being offline at the time. The sorted files themselves are fine; only the cloud copy is missing.</p>
-            </div>
-            <button type="button" class="button" id="retry-backups-btn">Retry now</button>
+    <section class="connections-alert" aria-live="polite">
+        <div>
+            <h2>{{ failed_backup_count }} Drive backup{{ failed_backup_count|pluralize }} didn't go through</h2>
+            <p>The original files are safe. Retry to create the missing cloud copies.</p>
         </div>
+        <button type="button" class="button" id="retry-backups-btn">Retry backups</button>
         <div id="retry-backups-result" class="help-text" hidden></div>
     </section>
     {% endif %}
 
-    {% for group in groups %}
-    <section class="connection-group" id="group-{{ forloop.counter }}">
-        <div class="connection-group-header">
-            <div>
-                <h2>{{ group.title }}</h2>
-                <p>{{ group.detail }}</p>
-            </div>
+    {% if action_count %}
+    <section class="connections-action-area" aria-labelledby="connections-action-heading">
+        <div class="connections-section-heading">
+            <span class="eyebrow">YOUR NEXT STEPS</span>
+            <h2 id="connections-action-heading">Needs setup or attention <span>{{ action_count }}</span></h2>
+            <p>Only services that need a decision or a fix are shown here.</p>
         </div>
-        <div class="connection-grid">
-            {% for card in group.cards %}
-            <article class="connection-card is-{{ card.status_class }}">
-                <div class="connection-card-head">
-                    <div>
-                        <span class="connection-area">{{ card.area }}</span>
-                        <h3>{{ card.title }}</h3>
-                    </div>
-                    <span class="connection-status is-{{ card.status_class }}">{{ card.status_label }}</span>
+        {% for group in action_groups %}
+        <section class="connection-group">
+            <div class="connection-group-header">
+                <div>
+                    <h3>{{ group.title }}</h3>
+                    <p>{{ group.detail }}</p>
                 </div>
-                <p>{{ card.detail }}</p>
-                <div class="connection-reason">
-                    <strong>What this helps with:</strong> {{ card.reason }}
-                </div>
-                <div class="connection-footer">
-                    <div class="connection-meta">
-                        <strong>{{ card.meta }}</strong>
-                        <span>{{ card.scope }}</span>
-                    </div>
-                    {% if card.action %}
-                    <a class="button {% if card.status == 'connected' %}button-ghost{% elif card.status == 'add' or card.status == 'setup' %}button-live{% else %}button-ghost{% endif %}" href="{{ card.action.url }}">{{ card.action.label }}</a>
-                    {% else %}
-                    <span class="path-text">No action yet</span>
-                    {% endif %}
-                </div>
-            </article>
-            {% endfor %}
+            </div>
+            {% include "organizer/partials/_connection_cards.html" with cards=group.cards %}
+        </section>
+        {% endfor %}
+    </section>
+    {% else %}
+    <section class="connections-all-clear">
+        <span class="connections-all-clear__mark" aria-hidden="true">✓</span>
+        <div>
+            <h2>Nothing needs your attention</h2>
+            <p>Your current connections are ready. Open the list below only when you want to manage one.</p>
         </div>
     </section>
-    {% endfor %}
+    {% endif %}
+
+    {% if configured_count %}
+    <details class="connections-configured">
+        <summary>
+            <span class="connections-configured__title">Ready and optional</span>
+            <span class="connections-configured__count">{{ configured_count }}</span>
+            <span class="connections-configured__hint">Show connected services and settings</span>
+        </summary>
+        <div class="connections-configured__groups">
+            {% for group in configured_groups %}
+            <section class="connection-group">
+                <div class="connection-group-header">
+                    <div>
+                        <h3>{{ group.title }}</h3>
+                        <p>{{ group.detail }}</p>
+                    </div>
+                </div>
+                {% include "organizer/partials/_connection_cards.html" with cards=group.cards %}
+            </section>
+            {% endfor %}
+        </div>
+    </details>
+    {% endif %}
 </div>
 
 {% if failed_backup_count %}

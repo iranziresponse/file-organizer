@@ -52,7 +52,10 @@
 
     {# Tier 2: one primary focus card + the activity film #}
     <div class="dashboard-tier2">
-        {% include "organizer/partials/_dashboard_focus.html" %}
+        <div class="dashboard-tier2__main">
+            {% include "organizer/partials/_dashboard_focus.html" %}
+            {% include "organizer/partials/_dashboard_tools.html" %}
+        </div>
         {% include "organizer/partials/_dashboard_activity.html" %}
     </div>
 

@@ -1,0 +1,24 @@
+<section class="card tool-glance" aria-label="Workspace tool status">
+    <div class="tool-glance__heading">
+        <div>
+            <span class="eyebrow">Your workspace</span>
+            <h2>Your tools, at a glance</h2>
+        </div>
+        <a href="{% url 'connections_home' %}">Manage</a>
+    </div>
+    <p class="tool-glance__intro">Current status for connected and available tools.</p>
+    <ul class="tool-glance__list">
+        {% for item in dashboard_tool_items %}
+        <li>
+            <a class="tool-glance__item is-{{ item.state }}" href="{{ item.url }}" title="{{ item.detail }}"
+               data-tool-glance-item>
+                <span class="tool-glance__copy">
+                    <strong>{{ item.name }}</strong>
+                    <span>{{ item.detail }}</span>
+                </span>
+                <span class="tool-glance__status">{{ item.status }}</span>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</section>

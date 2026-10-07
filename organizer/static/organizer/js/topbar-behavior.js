@@ -11,7 +11,7 @@
             toggle.setAttribute('title', theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode');
         }
 
-        apply(document.documentElement.dataset.theme || 'light');
+        apply(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
 
         toggle.addEventListener('click', function () {
             var current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
