@@ -104,6 +104,70 @@ class ThemeAndControlContractTests(SimpleTestCase):
         self.assertIn("--orch-link-hover: #23683a;", stylesheet)
         self.assertIn("color: var(--orch-link-hover);", stylesheet)
 
+    def test_shared_buttons_have_clear_hierarchy_and_accessible_states(self):
+        stylesheet = (
+            PROJECT_ROOT / "organizer" / "static" / "organizer" / "css" / "orch.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(".app-shell .button-live,", stylesheet)
+        self.assertIn("box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48)", stylesheet)
+        self.assertIn(".app-shell .button-ghost:hover,", stylesheet)
+        self.assertIn(".app-shell .button-danger,", stylesheet)
+        self.assertIn(".app-shell .button:focus-visible,", stylesheet)
+        self.assertIn(".app-shell button:disabled,", stylesheet)
+        self.assertIn(":not(.suggestion-token):not(.row-actions-item)", stylesheet)
+
+    def test_header_and_sidebar_spacing_is_aligned_across_layouts(self):
+        stylesheet = (
+            PROJECT_ROOT / "organizer" / "static" / "organizer" / "css" / "orch.css"
+        ).read_text(encoding="utf-8")
+        base_stylesheet = (
+            PROJECT_ROOT / "organizer" / "static" / "organizer" / "css" / "base.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("padding: 96px 32px 48px 248px;", stylesheet)
+        self.assertIn("body.has-desktop-titlebar .desktop-titlebar {\n    height: 32px;", base_stylesheet)
+        self.assertIn("padding: 70px 16px 64px 232px;", base_stylesheet)
+        self.assertIn("padding: 68px 14px 22px;", base_stylesheet)
+        self.assertIn("padding: 70px 12px 64px 76px;", base_stylesheet)
+        self.assertIn("padding: 68px 6px 22px;", base_stylesheet)
+
+    def test_header_actions_and_sidebar_icons_fit_their_layout_frames(self):
+        stylesheet = (
+            PROJECT_ROOT / "organizer" / "static" / "organizer" / "css" / "orch.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("justify-content: flex-end;", stylesheet)
+        self.assertIn("width: 38px !important;", stylesheet)
+        self.assertIn("height: 38px !important;", stylesheet)
+        self.assertIn("min-width: 36px !important;", stylesheet)
+        self.assertIn(
+            "@media (max-width: 1180px) {\n"
+            "    body.has-desktop-titlebar .app-sidebar-link {",
+            stylesheet,
+        )
+        self.assertIn("width: 40px;\n        min-width: 40px;", stylesheet)
+        self.assertIn("min-height: 58px !important;", stylesheet)
+
+    def test_light_desktop_window_controls_are_transparent_at_rest(self):
+        stylesheet = (
+            PROJECT_ROOT / "organizer" / "static" / "organizer" / "css" / "orch.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'html[data-theme="light"] body.has-desktop-titlebar .desktop-titlebar-btn {',
+            stylesheet,
+        )
+        self.assertIn("background: transparent !important;", stylesheet)
+        self.assertIn(
+            "html[data-theme=\"light\"] body.has-desktop-titlebar .desktop-titlebar-btn:hover",
+            stylesheet,
+        )
+        self.assertIn(
+            ".desktop-titlebar-btn.desktop-titlebar-close:hover",
+            stylesheet,
+        )
+
 
 class StudyNavigationContractTests(SandboxedPathsTestCase):
     def test_study_page_links_to_resource_radar_and_learning_routes(self):

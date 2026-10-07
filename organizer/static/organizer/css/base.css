@@ -6575,11 +6575,11 @@ html[data-theme="light"] .desktop-titlebar {
 
 /* Desktop exe polish: keep the app calm and native inside the frameless window. */
 body.has-desktop-titlebar .desktop-titlebar {
-    height: 30px;
+    height: 32px;
 }
 
 body.has-desktop-titlebar {
-    padding-top: 30px;
+    padding-top: 32px;
     height: 100vh;
     overflow: hidden;
 }
@@ -6596,27 +6596,27 @@ body.has-desktop-titlebar .desktop-titlebar-mark {
 
 body.has-desktop-titlebar .desktop-titlebar-btn {
     width: 42px;
-    height: 30px;
+    height: 32px;
 }
 
 body.has-desktop-titlebar .topbar.app-roof,
 body.has-desktop-titlebar .topbar.has-power-rail {
-    top: 30px !important;
+    top: 32px !important;
     left: 216px;
     width: auto;
 }
 
 body.has-desktop-titlebar .guide-overlay {
-    top: 30px;
+    top: 32px;
     padding: 18px;
 }
 
 body.has-desktop-titlebar .guide-panel {
-    max-height: calc(100vh - 66px);
+    max-height: calc(100vh - 68px);
 }
 
 body.has-desktop-titlebar .support-panel {
-    max-height: calc(100vh - 66px);
+    max-height: calc(100vh - 68px);
 }
 
 @media (max-width: 700px), (max-height: 680px) {
@@ -6642,24 +6642,19 @@ body.has-desktop-titlebar .support-panel {
 }
 
 body.has-desktop-titlebar .app-shell {
-    height: calc(100vh - 30px);
+    height: calc(100vh - 32px);
     min-height: 0;
-    /* .topbar is fixed (30px titlebar + its own ~65px, measured -- its two-
-       line brand copy makes it taller than its 54px min-height), so this
-       padding is what actually clears it for the real content below; 64px
-       left content starting 1px inside the topbar's own bottom edge, with
-       zero breathing room -- exactly the "starts right at the boundary"
-       look native apps avoid. */
-    padding: 78px 16px 64px 232px;
+    padding: 70px 16px 64px 232px;
     overflow-x: hidden;
     overflow-y: auto;
     scrollbar-width: thin;
 }
 
 body.has-desktop-titlebar .app-sidebar {
-    top: 30px;
+    top: 32px;
     bottom: 0;
     z-index: 280;
+    padding: 68px 14px 22px;
 }
 
 body.has-desktop-titlebar .topbar,
@@ -7113,7 +7108,7 @@ body.has-desktop-titlebar .table-shell table {
 
 @media (max-width: 1180px) {
     body.has-desktop-titlebar .app-shell {
-        padding: 76px 12px 62px 76px;
+        padding: 70px 12px 64px 76px;
     }
 
     body.has-desktop-titlebar .topbar.app-roof,
@@ -7123,7 +7118,7 @@ body.has-desktop-titlebar .table-shell table {
 
     body.has-desktop-titlebar .app-sidebar {
         width: 64px;
-        padding: 20px 6px;
+        padding: 68px 6px 22px;
         align-items: center;
     }
 
@@ -7259,7 +7254,7 @@ body.has-desktop-titlebar .table-shell table {
 
 @media (max-height: 720px) {
     body.has-desktop-titlebar .app-shell {
-        padding-top: 80px;
+        padding-top: 70px;
     }
 
     body.has-desktop-titlebar .page-heading,
