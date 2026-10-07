@@ -1,5 +1,8 @@
 import socket
 import tempfile
+import ctypes
+import sys
+from ctypes import wintypes
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -56,6 +59,81 @@ class DesktopStartupTests(SimpleTestCase):
         window.window.load_url.assert_called_once_with(
             "http://127.0.0.1:8765/study/"
         )
+
+    def test_finds_hidden_window_after_dashboard_changes_its_title(self):
+        class ApiFunction:
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __call__(self, *args):
+                return self.callback(*args)
+
+        class User32:
+            def __init__(self):
+                self.GetWindowThreadProcessId = ApiFunction(self.get_process_id)
+                self.GetWindowTextLengthW = ApiFunction(lambda hwnd: len(titles[hwnd]))
+                self.GetWindowTextW = ApiFunction(self.get_title)
+                self.EnumWindows = ApiFunction(self.enumerate_windows)
+
+            def get_process_id(self, hwnd, process_id):
+                ctypes.cast(process_id, ctypes.POINTER(wintypes.DWORD)).contents.value = pids[hwnd]
+                return 1
+
+            def get_title(self, hwnd, buffer, _size):
+                buffer.value = titles[hwnd]
+                return len(titles[hwnd])
+
+            def enumerate_windows(self, callback, parameter):
+                for hwnd in titles:
+                    callback(hwnd, parameter)
+                return 1
+
+        class Kernel32:
+            def __init__(self):
+                self.OpenProcess = ApiFunction(lambda _access, _inherit, pid: pid)
+                self.QueryFullProcessImageNameW = ApiFunction(self.get_process_image)
+                self.CloseHandle = ApiFunction(lambda _handle: 1)
+
+            def get_process_image(self, process, _flags, buffer, _size):
+                buffer.value = process_images[process]
+                return 1
+
+        titles = {10: "Dashboard - Orch", 20: "Other application"}
+        pids = {10: 100, 20: 200}
+        process_images = {
+            100: str(Path(sys.executable).resolve()),
+            200: r"C:\Other\other.exe",
+        }
+        user32 = User32()
+        kernel32 = Kernel32()
+
+        with patch("ctypes.WinDLL", side_effect=lambda name, **_: {
+            "user32": user32,
+            "kernel32": kernel32,
+        }[name]), patch.object(app.sys, "frozen", True, create=True):
+            existing = app._find_existing_window()
+
+        self.assertEqual(existing, (10, 100))
+
+    @patch("gui.app._find_existing_window", return_value=(123, 456))
+    @patch("gui.app.sys.platform", "win32")
+    def test_second_launch_restores_and_foregrounds_existing_window(self, _find_window):
+        user32 = Mock()
+        user32.IsWindowVisible.return_value = 1
+        kernel32 = Mock()
+
+        with patch("ctypes.WinDLL", side_effect=lambda name, **_: {
+            "user32": user32,
+            "kernel32": kernel32,
+        }[name]):
+            focused = app._focus_existing_instance()
+
+        self.assertTrue(focused)
+        kernel32.AllowSetForegroundWindow.assert_called_once_with(456)
+        user32.ShowWindow.assert_called_once_with(123, 9)
+        user32.BringWindowToTop.assert_called_once_with(123)
+        user32.SetForegroundWindow.assert_called_once_with(123)
+        user32.FlashWindow.assert_not_called()
 
     def test_port_in_use_selects_an_available_local_port(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:

@@ -27,22 +27,111 @@ def _silence_none_streams():
 _single_instance_mutex = None
 
 
+def _find_existing_window():
+    """Find this install's top-level window even after the page changes its title."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextW.restype = ctypes.c_int
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
+    ]
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    executable = os.path.normcase(os.path.realpath(sys.executable))
+    windows = []
+
+    def collect(hwnd, _):
+        process_id = wintypes.DWORD()
+        if not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id)):
+            return True
+
+        process = kernel32.OpenProcess(0x1000, False, process_id.value)
+        if not process:
+            return True
+        try:
+            image_path = ctypes.create_unicode_buffer(32768)
+            image_length = wintypes.DWORD(len(image_path))
+            if not kernel32.QueryFullProcessImageNameW(
+                process, 0, image_path, ctypes.byref(image_length)
+            ):
+                return True
+            if os.path.normcase(os.path.realpath(image_path.value)) != executable:
+                return True
+
+            title_length = user32.GetWindowTextLengthW(hwnd)
+            title_buffer = ctypes.create_unicode_buffer(title_length + 1)
+            user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
+            title = title_buffer.value.strip()
+            orch_title = "orch" in title.casefold()
+            if not getattr(sys, "frozen", False) and not orch_title:
+                return True
+
+            # Prefer the app window's normal title; retain a same-process
+            # fallback for frozen builds if a backend temporarily clears it.
+            priority = 0 if title.casefold() == "orch" else 1 if orch_title else 2
+            windows.append((priority, hwnd, process_id.value))
+            return True
+        finally:
+            kernel32.CloseHandle(process)
+
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    callback = callback_type(collect)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.EnumWindows(callback, 0)
+
+    if not windows:
+        return None
+    _, hwnd, process_id = min(windows, key=lambda item: item[0])
+    return hwnd, process_id
+
+
 def _focus_existing_instance():
-    """Bring the ready Orch window to the front. The main window is titled
-    "Orch" only after its first dashboard page loads, so a second launch
-    cannot reveal its blank startup surface."""
+    """Restore the running window when a user launches Orch a second time."""
     if sys.platform != "win32":
-        return
+        return False
     try:
         import ctypes
 
-        user32 = ctypes.windll.user32
-        hwnd = user32.FindWindowW(None, "Orch")
-        if hwnd:
-            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-            user32.SetForegroundWindow(hwnd)
-    except Exception:
-        pass
+        existing_window = _find_existing_window()
+        if not existing_window:
+            return False
+        hwnd, process_id = existing_window
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.AllowSetForegroundWindow(process_id)
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE also unhides a hidden window.
+        user32.BringWindowToTop(hwnd)
+        if not user32.SetForegroundWindow(hwnd):
+            user32.FlashWindow(hwnd, True)
+        return bool(user32.IsWindowVisible(hwnd))
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
+def _report_existing_instance_not_found():
+    message = (
+        "Orch is already running, but Windows could not restore its window. "
+        "Open the Orch icon in the notification area and choose “Open Orch”."
+    )
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, "Orch is already running", 0x40)
+    except (AttributeError, OSError):
+        print(message, file=sys.stderr)
 
 
 def _enforce_single_instance():
@@ -80,7 +169,8 @@ def _enforce_single_instance():
     already_running = ctypes.get_last_error() == ERROR_ALREADY_EXISTS
 
     if already_running:
-        _focus_existing_instance()
+        if not _focus_existing_instance():
+            _report_existing_instance_not_found()
         os._exit(0)
 
     # Kept alive for the life of the process -- letting it get garbage
