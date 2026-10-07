@@ -87,19 +87,11 @@ class DashboardQueryBudgetTests(SandboxedPathsTestCase):
 
 class ConnectionsQueryBudgetTests(SandboxedPathsTestCase):
     def test_connections_home_query_count(self):
-        # 24, not 23: +1 for the failed_backup_count query the Drive
-        # backup retry feature added (organizer.core.jobs' offline/retry
-        # phase) -- a real, deliberate query, not a regression.
-        #
-        # 27, not 24: +2 for @perf.measure_view's own profile re-fetch and
-        # PerformanceMetric write (same feature as the dashboard/study
-        # budgets above), and +1 more from this view's own query count
-        # growing from 24 to 25 independently -- confirmed stable and
-        # reproducible, not flaky, but not traced to a specific line here;
-        # worth a closer look if this page's query count matters again.
+        # Publishing channel status/counts are derived from two loaded
+        # channel lists instead of repeated existence/count queries.
         self.make_profile()
         cache.clear()
-        with self.assertNumQueries(27):
+        with self.assertNumQueries(15):
             self.client.get(reverse("connections_home"))
 
 

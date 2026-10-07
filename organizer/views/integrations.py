@@ -213,10 +213,6 @@ def _publishing_ready(channels):
     return channels.filter(status="connected").exists()
 
 
-def _publishing_needs_key(channels):
-    return channels.filter(status="needs_key").exists()
-
-
 @perf.measure_view
 def connections_home(request):
     """Show supported connections with concise, evidence-based states."""
@@ -272,8 +268,11 @@ def connections_home(request):
     drive_ready = bool(drive_enabled and drive_configured)
     drive_linked = bool(drive_ready and drive_token_available)
 
-    custom_channels = profile_connections.filter(provider="custom_website")
-    github_channels = profile_connections.filter(provider="github")
+    custom_channels = list(profile_connections.filter(provider="custom_website"))
+    github_channels = list(profile_connections.filter(provider="github"))
+    custom_ready = any(channel.status == "connected" for channel in custom_channels)
+    github_ready = any(channel.status == "connected" for channel in github_channels)
+    github_needs_key = any(channel.status == "needs_key" for channel in github_channels)
     active_categories = GlobalSortCategory.objects.exclude(key="sensitive").filter(enabled=True).count()
 
     has_profile = bool(profile)
@@ -413,26 +412,26 @@ def connections_home(request):
         _connection_card(
             title="Custom Website API",
             area="Publishing",
-            status="connected" if _publishing_ready(custom_channels) else "saved" if custom_channels.exists() else "add",
-            status_label="Connected" if _publishing_ready(custom_channels) else "Saved" if custom_channels.exists() else "Add",
-            detail=f"{custom_channels.count()} website channel{'s' if custom_channels.count() != 1 else ''} configured." if custom_channels.exists() else "Connect your own website or blog endpoint.",
+            status="connected" if custom_ready else "saved" if custom_channels else "add",
+            status_label="Connected" if custom_ready else "Saved" if custom_channels else "Add",
+            detail=f"{len(custom_channels)} website channel{'s' if len(custom_channels) != 1 else ''} configured." if custom_channels else "Connect your own website or blog endpoint.",
             reason="This is the most flexible route: Orch keeps the draft here, waits for your click, then sends it to your own site.",
-            action=_connection_action(publishing_url, "Manage" if custom_channels.exists() else "Add" if has_profile else "Create profile"),
+            action=_connection_action(publishing_url, "Manage" if custom_channels else "Add" if has_profile else "Create profile"),
             meta="User-owned API",
             scope=profile.name if profile else "No active profile",
-            requires_action=not _publishing_ready(custom_channels),
+            requires_action=not custom_ready,
         ),
         _connection_card(
             title="GitHub Publishing",
             area="Publishing",
-            status="connected" if _publishing_ready(github_channels) else "needs_key" if _publishing_needs_key(github_channels) else "saved" if github_channels.exists() else "add",
-            status_label="Connected" if _publishing_ready(github_channels) else "Needs token" if _publishing_needs_key(github_channels) else "Saved" if github_channels.exists() else "Add",
-            detail=f"{github_channels.count()} repo channel{'s' if github_channels.count() != 1 else ''} configured." if github_channels.exists() else "Publish approved posts as commits to a repo.",
+            status="connected" if github_ready else "needs_key" if github_needs_key else "saved" if github_channels else "add",
+            status_label="Connected" if github_ready else "Needs token" if github_needs_key else "Saved" if github_channels else "Add",
+            detail=f"{len(github_channels)} repo channel{'s' if len(github_channels) != 1 else ''} configured." if github_channels else "Publish approved posts as commits to a repo.",
             reason="Useful when you want approved drafts to become dated commits in a repo you own.",
-            action=_connection_action(publishing_url, "Manage" if github_channels.exists() else "Add" if has_profile else "Create profile"),
+            action=_connection_action(publishing_url, "Manage" if github_channels else "Add" if has_profile else "Create profile"),
             meta="Repo commits",
             scope=profile.name if profile else "No active profile",
-            requires_action=not _publishing_ready(github_channels),
+            requires_action=not github_ready,
         ),
         _connection_card(
             title="Markdown / HTML Export",

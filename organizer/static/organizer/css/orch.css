@@ -1319,8 +1319,15 @@ table tbody tr:hover {
     border-radius: 50%;
     background: var(--orch-green);
     color: var(--orch-surface);
-    font-size: 18px;
-    font-weight: 800;
+}
+
+.connections-all-clear__mark::before {
+    width: 8px;
+    height: 13px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    content: "";
+    transform: translateY(-2px) rotate(45deg);
 }
 
 .connections-all-clear h2 {
