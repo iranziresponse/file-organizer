@@ -3,7 +3,7 @@ from unittest import mock
 from django.urls import reverse
 
 from organizer.core import drive_api, jobs, sorting
-from organizer.models import BackgroundTask, MoveEvent
+from organizer.models import BackgroundTask, MoveEvent, Notification
 
 from .helpers import SandboxedPathsTestCase
 from .test_jobs import ImmediateThread
@@ -49,6 +49,32 @@ class RetryFailedDriveBackupsTests(SandboxedPathsTestCase):
             sorting.retry_failed_drive_backups(self.profile)
 
         self.assertEqual(MoveEvent.objects.get().drive_backup_status, "failed")
+
+    def test_new_backup_failures_are_rate_limited_per_profile(self):
+        events = []
+        for index in range(2):
+            target = self.profile_root / f"notes-{index}.pdf"
+            target.write_bytes(b"x")
+            events.append(MoveEvent.objects.create(
+                profile=self.profile,
+                filename=target.name,
+                destination_path=str(target),
+                method="course_code",
+                success=True,
+            ))
+
+        with mock.patch.object(drive_api, "load_drive_config", return_value={"enabled": True}), \
+                mock.patch.object(drive_api, "backup_file", return_value=False):
+            for event in events:
+                sorting._backup_and_record(event.pk, event.destination_path)
+
+        self.assertEqual(
+            Notification.objects.filter(
+                profile=self.profile,
+                title="Google Drive backup needs attention",
+            ).count(),
+            1,
+        )
 
     def test_skips_a_file_that_no_longer_exists_where_orch_left_it(self):
         MoveEvent.objects.create(

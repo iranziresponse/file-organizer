@@ -6,10 +6,11 @@ threads under one system tray icon -- no console window, no separate
 
 import os
 import sys
-import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 
 def _silence_none_streams():
@@ -42,26 +43,6 @@ def _focus_existing_instance():
             user32.SetForegroundWindow(hwnd)
     except Exception:
         pass
-
-
-def _dashboard_already_serving():
-    """True if something is already answering on the dashboard port -- an
-    Orch instance that got fully up. A cheap backstop for the mutex check
-    below, since a missed detection there means a second process builds its
-    own tray, window and server, the server fails to bind this port and
-    os._exit(1)s from a daemon thread mid-startup, and the half-built
-    window is left behind black -- exactly the "second window, closing it
-    kills the app" report."""
-    import socket
-
-    # Literals rather than importing gui.server, which pulls in Django
-    # modules at import time and this runs before django.setup(). Keep in
-    # sync with gui/server.py's DASHBOARD_HOST / DASHBOARD_PORT.
-    try:
-        with socket.create_connection(("127.0.0.1", 8765), timeout=0.4):
-            return True
-    except OSError:
-        return False
 
 
 def _enforce_single_instance():
@@ -98,12 +79,6 @@ def _enforce_single_instance():
     ERROR_ALREADY_EXISTS = 183
     already_running = ctypes.get_last_error() == ERROR_ALREADY_EXISTS
 
-    # Independent second signal: a prior instance whose server is already
-    # up. Covers any path where the mutex signal is missed or the handle
-    # was inherited.
-    if not already_running and _dashboard_already_serving():
-        already_running = True
-
     if already_running:
         _focus_existing_instance()
         os._exit(0)
@@ -138,17 +113,47 @@ def _wait_for_server(url, timeout=10, interval=0.05):
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            urllib.request.urlopen(url, timeout=0.5)
+            response = urllib.request.urlopen(url, timeout=0.5)
+            response.close()
+            return True
+        except urllib.error.HTTPError as response:
+            response.close()
             return True
         except (urllib.error.URLError, OSError):
             time.sleep(interval)
     return False
 
 
-def main():
-    _silence_none_streams()
-    _enforce_single_instance()
-    _claim_windows_app_identity()
+def _report_startup_failure(exc):
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    log_dir = (
+        Path(local_app_data) / "Orch" / "logs"
+        if local_app_data else Path.home() / ".orch" / "logs"
+    )
+    log_path = log_dir / "startup.log"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"\n--- Orch startup failure ---\n{traceback.format_exc()}\n")
+    except OSError:
+        log_path = None
+
+    message = f"Orch couldn't start: {exc}"
+    if log_path:
+        message += f"\n\nDetails were saved to:\n{log_path}"
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(None, message, "Orch couldn't start", 0x10)
+            return
+        except (AttributeError, OSError):
+            pass
+    print(message, file=sys.stderr)
+
+
+def _run_application():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
     import django
@@ -166,20 +171,13 @@ def main():
     autostart.enable_on_first_run()
     start_menu.ensure_shortcut()
     start_dashboard_server()
+    if not _wait_for_server(dashboard_url()):
+        raise RuntimeError(
+            "Orch's local dashboard did not start. Restart the app and, if it "
+            "happens again, share the startup log with Orch support."
+        )
 
     tray = OrganizerTray()
-    tray.run()
-
-    def _open_at_startup():
-        _wait_for_server(dashboard_url())
-        # desktop-shell/ marks the session as running inside Orch's own
-        # window (see organizer.context_processors.desktop_shell) and
-        # itself redirects to the setup checklist or the dashboard,
-        # whichever is right for this profile -- one URL load covers both
-        # cases instead of a second navigation call here.
-        tray.main_window.open_path("desktop-shell/", show_after_load=True)
-
-    threading.Thread(target=_open_at_startup, daemon=True).start()
 
     import webview
 
@@ -189,7 +187,23 @@ def main():
     # sys.executable -- python.exe's own generic icon in dev mode, since
     # _claim_windows_app_identity() above only fixes taskbar grouping, not
     # which bitmap actually gets shown for the window/taskbar button.
-    webview.start(icon=str(ORCH_ICON_PATH))
+    try:
+        tray.run()
+        webview.start(icon=str(ORCH_ICON_PATH))
+    except Exception:
+        tray.watcher.stop()
+        tray.icon.stop()
+        raise
+
+
+def main():
+    _silence_none_streams()
+    try:
+        _enforce_single_instance()
+        _claim_windows_app_identity()
+        _run_application()
+    except Exception as exc:
+        _report_startup_failure(exc)
 
 
 if __name__ == "__main__":

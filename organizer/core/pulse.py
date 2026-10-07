@@ -27,6 +27,7 @@ DEADLINE_HORIZON_DAYS = 14
 RECENT_MOVE_WINDOW = timedelta(minutes=5)
 # TimetableEntry.end_time is nullable; treat a dateless lecture as this long.
 DEFAULT_LECTURE_MINUTES = 60
+ACTIVITY_CARD_LIMIT = 10
 
 
 def _idle():
@@ -145,9 +146,20 @@ def _lecture_badge(profile, now):
         .first()
     )
     if nxt:
+        minutes_until = max(
+            0,
+            int(
+                (
+                    datetime.combine(today, nxt.start_time)
+                    - now.replace(tzinfo=None)
+                ).total_seconds()
+                / 60
+            ),
+        )
         return {
             "state": "resting",
             "label": f"Next: {nxt.course_code or 'lecture'} at {nxt.start_time.strftime('%H:%M')}",
+            "minutes_until": minutes_until,
             "url": reverse("timetable_view"),
         }
     return None
@@ -184,6 +196,9 @@ def _deadline_badge(profile, now):
     return {
         "state": "resting",
         "label": f"{item.title} due {_short_timesince_future(item.due_at, now)}",
+        "title": item.title,
+        "subject_code": item.subject_code,
+        "due_at": item.due_at.isoformat(),
         "url": reverse("assignment_tracker"),
     }
 
@@ -239,7 +254,7 @@ _ICONS = {
 }
 
 
-def get_activity_stream(profile, limit=30):
+def get_activity_stream(profile, limit=ACTIVITY_CARD_LIMIT):
     """Reverse-chronological union of what Orch has been doing: MoveEvent,
     Notification, finished BackgroundTask, and ReviewItem state changes.
     select_related() on the profile/course FKs -- four related models in one
@@ -248,7 +263,7 @@ def get_activity_stream(profile, limit=30):
     return get_activity_stream_with_status(profile, limit)[0]
 
 
-def get_activity_stream_with_status(profile, limit=30):
+def get_activity_stream_with_status(profile, limit=ACTIVITY_CARD_LIMIT):
     """Return activity rows and whether the data query failed.
 
     The dashboard can keep rendering if this query fails, but it must not
@@ -266,6 +281,7 @@ def get_activity_stream_with_status(profile, limit=30):
 def _build_activity_stream(profile, limit):
     from ..models import BackgroundTask, MoveEvent, Notification, ReviewItem
 
+    limit = max(0, min(limit, ACTIVITY_CARD_LIMIT))
     rows = []
 
     for ev in (
@@ -347,13 +363,13 @@ def _build_activity_stream(profile, limit):
     return rows
 
 
-def get_activity_stream_json(profile, limit=30):
+def get_activity_stream_json(profile, limit=ACTIVITY_CARD_LIMIT):
     """get_activity_stream() with the datetime dropped, for the pulse
     endpoint's JSON payload."""
     return get_activity_stream_json_with_status(profile, limit)[0]
 
 
-def get_activity_stream_json_with_status(profile, limit=30):
+def get_activity_stream_json_with_status(profile, limit=ACTIVITY_CARD_LIMIT):
     rows, failed = get_activity_stream_with_status(profile, limit)
     return [
         {k: v for k, v in row.items() if k != "when"}

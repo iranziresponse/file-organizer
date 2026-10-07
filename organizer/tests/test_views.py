@@ -1,10 +1,23 @@
 import json
+from datetime import timedelta
 from unittest import mock
 
+from django.test import TransactionTestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from organizer.core import paths
-from organizer.models import CourseConfig, IntegrationConnection, MoveEvent, Profile, SortDecision
+from organizer.models import (
+    AssignmentItem,
+    CourseConfig,
+    IntegrationConnection,
+    MoveEvent,
+    Notification,
+    Profile,
+    ResourceRecommendation,
+    SortDecision,
+    TimetableEntry,
+)
 
 from .helpers import SandboxedPathsTestCase
 
@@ -33,6 +46,143 @@ class ActivityPingViewTests(SandboxedPathsTestCase):
         self.make_profile()
         response = self.client.get(reverse("activity_ping"))
         self.assertIsNone(response.json()["latest"])
+
+
+class WorkspaceControllerViewTests(SandboxedPathsTestCase):
+    @mock.patch("organizer.core.drive_api.storage_quota_snapshot", return_value=None)
+    def test_dashboard_controller_surfaces_real_schedule_resources_and_backup_state(self, _quota):
+        profile = self.make_profile()
+        now = timezone.localtime()
+        lesson_time = (now + timedelta(hours=1)).time().replace(second=0, microsecond=0)
+        TimetableEntry.objects.create(
+            profile=profile,
+            kind="teaching",
+            source="manual",
+            weekday=now.weekday(),
+            start_time=lesson_time,
+            raw_group="SE-2",
+            course_code="CSC2114",
+        )
+        ResourceRecommendation.objects.create(
+            profile=profile,
+            subject_code="CSC2114",
+            theme="machine learning",
+            source_type="youtube",
+            title="Machine learning fundamentals",
+            query="machine learning fundamentals",
+            url="https://www.youtube.com/watch?v=example",
+            reason="Based on your saved topics",
+        )
+        MoveEvent.objects.create(
+            profile=profile,
+            filename="notes.pdf",
+            source_path=str(self.downloads / "notes.pdf"),
+            destination_path=str(self.profile_root / "notes.pdf"),
+            method="course_code",
+            success=True,
+            drive_backup_status="failed",
+        )
+        Notification.objects.create(profile=profile, title="New update")
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        cards = response.context["controller_items"]
+        self.assertTrue(any(card["kind"] == "schedule" and "CSC2114" in card["detail"] for card in cards))
+        self.assertTrue(any(card["kind"] == "resource" and card["external"] for card in cards))
+        self.assertTrue(any(card["kind"] == "storage" and "backup" in card["title"].lower() for card in cards))
+        self.assertTrue(any(card["kind"] == "notifications" for card in cards))
+        self.assertContains(response, "Workspace controller")
+        self.assertContains(response, 'target="_blank" rel="noopener noreferrer"')
+
+    @mock.patch("organizer.core.drive_api.storage_quota_snapshot", return_value={"percent": 100})
+    def test_dashboard_controller_only_calls_drive_full_when_quota_is_verified(self, _quota):
+        profile = self.make_profile()
+
+        response = self.client.get(reverse("dashboard"))
+
+        storage = next(
+            item for item in response.context["controller_items"] if item["kind"] == "storage"
+        )
+        self.assertEqual(storage["title"], "Google Drive is full")
+        self.assertIn("Free Drive space", storage["detail"])
+
+    @mock.patch("organizer.core.drive_api.storage_quota_snapshot", return_value=None)
+    def test_pulse_endpoint_refreshes_controller_cards(self, _quota):
+        profile = self.make_profile()
+        AssignmentItem.objects.create(
+            profile=profile,
+            title="Project submission",
+            due_at=timezone.now() + timedelta(hours=3),
+        )
+
+        response = self.client.get(reverse("pulse_data"))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(any(item["kind"] == "deadline" for item in data["controller"]))
+
+
+class MoveHistoryViewTests(SandboxedPathsTestCase):
+    def test_history_loads_one_bounded_page_and_supports_next(self):
+        profile = self.make_profile()
+        for index in range(56):
+            MoveEvent.objects.create(
+                profile=profile,
+                filename=f"file-{index}.pdf",
+                destination_path=str(self.profile_root / f"file-{index}.pdf"),
+                method="course_code",
+                success=True,
+            )
+
+        first_page = self.client.get(reverse("move_history"))
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.context["page_obj"].paginator.count, 56)
+        self.assertEqual(len(first_page.context["page_obj"].object_list), 50)
+        self.assertContains(first_page, "Next")
+        self.assertEqual(first_page.content.count(b'class="recent-move-row"'), 50)
+
+        second_page = self.client.get(reverse("move_history"), {"page": 2})
+
+        self.assertEqual(len(second_page.context["page_obj"].object_list), 6)
+        self.assertContains(second_page, "Previous")
+        self.assertNotContains(second_page, ">Next<")
+
+    def test_history_requires_an_active_profile(self):
+        response = self.client.get(reverse("move_history"))
+
+        self.assertRedirects(response, reverse("dashboard"))
+
+    @mock.patch("organizer.views.files.connection")
+    def test_compact_database_runs_sqlite_vacuum(self, database):
+        self.make_profile()
+        database.vendor = "sqlite"
+        database.in_atomic_block = False
+
+        response = self.client.post(reverse("move_history_compact"))
+
+        self.assertRedirects(response, reverse("move_history"))
+        database.cursor.return_value.__enter__.return_value.execute.assert_called_once_with("VACUUM")
+
+    def test_compaction_rejects_get_requests(self):
+        response = self.client.get(reverse("move_history_compact"))
+
+        self.assertEqual(response.status_code, 405)
+
+
+class MoveHistoryCompactionIntegrationTests(TransactionTestCase):
+    def test_sqlite_database_compaction_completes(self):
+        Profile.objects.create(
+            name="Compaction profile",
+            root_path="unused",
+            is_active=True,
+        )
+
+        response = self.client.post(reverse("move_history_compact"), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Database compacted.")
 
 
 class StatusBarViewTests(SandboxedPathsTestCase):

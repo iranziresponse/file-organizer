@@ -5,7 +5,7 @@ import requests
 from django.urls import reverse
 
 from organizer.core import drive_api
-from organizer.models import IntegrationConnection
+from organizer.models import IntegrationConnection, Notification
 
 from .helpers import SandboxedPathsTestCase
 
@@ -135,6 +135,45 @@ class BackupFileTests(SandboxedPathsTestCase):
         self.assertTrue(result)
         post.assert_called_once()
         self.assertEqual(post.call_args.kwargs["params"], {"uploadType": "multipart"})
+
+
+class DriveStorageQuotaTests(SandboxedPathsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.cache = mock.patch.dict(
+            drive_api._storage_quota_cache,
+            {"value": None, "updated_at": 0.0, "refreshing": False},
+        )
+        self.cache.start()
+        self.addCleanup(self.cache.stop)
+
+    def test_verified_near_full_quota_is_cached_and_warned_once(self):
+        profile = self.make_profile()
+        response = mock.Mock()
+        response.json.return_value = {"storageQuota": {"usage": "95", "limit": "100"}}
+        with mock.patch.object(drive_api, "get_valid_access_token", return_value="token"), \
+                mock.patch.object(drive_api.requests, "get", return_value=response):
+            drive_api._refresh_storage_quota(profile)
+            drive_api._refresh_storage_quota(profile)
+
+        self.assertEqual(drive_api._storage_quota_cache["value"]["percent"], 95)
+        self.assertEqual(
+            Notification.objects.filter(
+                profile=profile, title="Google Drive storage is almost full"
+            ).count(),
+            1,
+        )
+
+    def test_failed_quota_request_is_not_reported_as_verified_usage(self):
+        profile = self.make_profile()
+        response = mock.Mock()
+        response.raise_for_status.side_effect = requests.ConnectionError("offline")
+        with mock.patch.object(drive_api, "get_valid_access_token", return_value="token"), \
+                mock.patch.object(drive_api.requests, "get", return_value=response):
+            drive_api._refresh_storage_quota(profile)
+
+        self.assertIsNone(drive_api._storage_quota_cache["value"])
+        self.assertFalse(Notification.objects.filter(profile=profile).exists())
 
 
 class DriveConnectViewTests(SandboxedPathsTestCase):

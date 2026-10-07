@@ -410,6 +410,14 @@ def sync_assignments(
             activity_type="muele_sync",
             title=f"MUELE sync: {count} new assignment(s)",
         )
+        from . import notifications
+
+        notifications.notify_new_items(
+            "New MUELE assignments",
+            "MUELE assignment",
+            count,
+            profile=profile,
+        )
 
     return count
 

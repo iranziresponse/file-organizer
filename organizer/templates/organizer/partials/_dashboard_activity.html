@@ -1,9 +1,6 @@
 {% comment %}
-Tier 2, right column; the activity film. A reverse-chronological stream of
-what Orch has done, from organizer.core.pulse.get_activity_stream() (union of
-MoveEvent, Notification, finished BackgroundTask, ReviewItem changes; capped
-at 30). Phase 4 gives new items a short slide+fade as they arrive and wires
-the announce toggle.
+Tier 2, right column; the bounded recent activity feed. Older file actions
+live on the paginated Move history page; this card never grows with history.
 
 Accessibility: the log is aria-live="off" by default so a screen reader is
 not interrupted every few seconds. "Announce new activity" flips it to
@@ -21,6 +18,7 @@ contents, at most once every 30s.
             <input type="checkbox" id="activity-announce-toggle">
             Announce new activity
         </label>
+        <a class="button button-ghost button-compact" href="{% url 'move_history' %}">View history</a>
     </div>
 
     <p class="activity-announcer visually-hidden" id="activity-announcer" role="status" aria-live="polite"></p>

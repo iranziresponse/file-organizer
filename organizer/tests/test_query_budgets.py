@@ -43,6 +43,12 @@ class DashboardQueryBudgetTests(SandboxedPathsTestCase):
         # tracked page renders -- a deliberate, fixed per-request cost, not
         # a regression.
         #
+        # 96, not 91: the dashboard's bounded Workspace Controller adds
+        # five indexed/current-state reads (pending decisions, recommendations,
+        # failed backups, connection errors, and unread notifications). Its
+        # schedule, deadline, and review cards reuse the already-built pulse
+        # snapshot rather than repeating those queries.
+        #
         # 91, not 80: the decongested dashboard server-renders its Tier 1
         # live strip (organizer.core.pulse.get_snapshot: sorting task,
         # recent-move count, in-flight tasks, next lecture, review count,
@@ -53,7 +59,7 @@ class DashboardQueryBudgetTests(SandboxedPathsTestCase):
         # a third client-side polling timer, which the /api/pulse/ endpoint
         # now replaces with one visibility-aware, backing-off poll.
         cache.clear()
-        with self.assertNumQueries(91):
+        with self.assertNumQueries(96):
             self.client.get(reverse("dashboard"))
 
     def test_study_home_query_count(self):

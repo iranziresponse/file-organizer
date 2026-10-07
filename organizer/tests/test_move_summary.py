@@ -167,3 +167,16 @@ class MoveClearHistoryViewTests(SandboxedPathsTestCase):
         self.assertFalse(MoveEvent.objects.filter(profile=profile).exists())
         self.assertTrue(MoveEvent.objects.filter(profile=other_profile).exists())
         self.assertTrue(MoveEvent.objects.filter(profile__isnull=True).exists())
+
+    def test_history_clear_returns_to_the_paginated_history(self):
+        profile = self.make_profile()
+        MoveEvent.objects.create(
+            profile=profile, filename="old.pdf", destination_path="x", method="course_code"
+        )
+
+        response = self.client.post(
+            reverse("move_clear_history"), {"return_to": "history"}
+        )
+
+        self.assertRedirects(response, reverse("move_history"))
+        self.assertFalse(MoveEvent.objects.filter(profile=profile).exists())

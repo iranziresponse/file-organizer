@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import string
 from collections import Counter
@@ -10,6 +11,7 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import DatabaseError, connection
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -69,6 +71,65 @@ from ..models import (
     SuggestedCourseUnit,
     TimetableEntry,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def move_history(request):
+    """Show a fixed-size page of the active profile's file action history."""
+    profile = Profile.get_active()
+    if not profile:
+        messages.error(request, "Activate a profile first.")
+        return redirect("dashboard")
+
+    from ..core.contexts import get_context_for_profile
+
+    events = (
+        MoveEvent.objects.filter(profile=profile)
+        .select_related("sort_decision", "summary")
+        .order_by("-timestamp", "-pk")
+    )
+    page_obj = Paginator(events, 50).get_page(request.GET.get("page", 1))
+    return render(request, "organizer/move_history.html", {
+        "profile": profile,
+        "study_context": get_context_for_profile(profile),
+        "page_obj": page_obj,
+    })
+
+
+def move_history_compact(request):
+    """Reclaim free SQLite pages after history has been removed."""
+    if request.method != "POST":
+        return HttpResponse("POST required.", status=405)
+
+    if not Profile.get_active():
+        messages.error(request, "Activate a profile first.")
+        return redirect("dashboard")
+
+    if connection.vendor != "sqlite":
+        messages.error(request, "Database compaction is only available for SQLite.")
+        return redirect("move_history")
+    if connection.in_atomic_block:
+        messages.error(
+            request,
+            "Database compaction could not start inside an active transaction. "
+            "Please try again from the history page.",
+        )
+        return redirect("move_history")
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("VACUUM")
+    except DatabaseError:
+        logger.exception("Could not compact the Orch database.")
+        messages.error(
+            request,
+            "Orch could not compact the database. Your history is unchanged; "
+            "close other Orch windows and try again.",
+        )
+    else:
+        messages.success(request, "Database compacted. Free space is available again.")
+    return redirect("move_history")
 
 
 def export_bundles(request):
@@ -227,9 +288,16 @@ def move_clear_history(request):
         messages.error(request, "Activate a profile first.")
         return redirect("dashboard")
 
-    deleted, _ = MoveEvent.objects.filter(profile=profile).delete()
-    messages.success(request, f"Cleared {deleted} move record(s) from the history.")
-    return redirect("dashboard")
+    events = MoveEvent.objects.filter(profile=profile)
+    event_count = events.count()
+    events.delete()
+    messages.success(
+        request,
+        f"Cleared {event_count} move record(s). Files were not changed; undo "
+        "information and summaries for these moves were removed.",
+    )
+    destination = "move_history" if request.POST.get("return_to") == "history" else "dashboard"
+    return redirect(destination)
 
 
 def move_clear_one(request, pk):

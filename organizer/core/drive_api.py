@@ -22,6 +22,7 @@ failure can never stop a real file move from completing.
 import json
 import logging
 import mimetypes
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -46,6 +47,9 @@ logger = logging.getLogger("organizer.drive")
 # In-memory only -- an access token is short-lived (~1h) and cheap to
 # re-derive from the refresh token, so there's no need to persist it.
 _access_token_cache = {"token": None, "expires_at": 0}
+_storage_quota_cache = {"value": None, "updated_at": 0.0, "refreshing": False}
+_storage_quota_lock = threading.Lock()
+_STORAGE_QUOTA_TTL = 900
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +206,7 @@ def get_account_email(access_token: str) -> str | None:
         resp = requests.get(
             ABOUT_URL,
             params={"fields": "user(emailAddress)"},
-            headers={"Authorization": f"Bearer {access_token}"},
+            headers={"Authorization": "Bearer " + access_token},
             timeout=_DEFAULT_TIMEOUT,
         )
         resp.raise_for_status()
@@ -210,6 +214,98 @@ def get_account_email(access_token: str) -> str | None:
     except requests.RequestException as exc:
         logger.warning("Could not read the connected Drive account: %s", exc)
         return None
+
+
+def _refresh_storage_quota(profile) -> None:
+    from django.db import close_old_connections
+
+    close_old_connections()
+    try:
+        access_token = get_valid_access_token()
+        if not access_token:
+            quota = None
+        else:
+            response = requests.get(
+                ABOUT_URL,
+                params={"fields": "storageQuota(usage,limit)"},
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=5,
+            )
+            response.raise_for_status()
+            quota_data = response.json().get("storageQuota", {})
+            usage = int(quota_data.get("usage", 0))
+            limit = int(quota_data["limit"]) if quota_data.get("limit") else None
+            quota = {"usage": usage, "limit": limit}
+            if limit:
+                quota["percent"] = min(100, round(usage * 100 / limit))
+                quota["remaining"] = max(0, limit - usage)
+
+        with _storage_quota_lock:
+            _storage_quota_cache["value"] = quota
+            _storage_quota_cache["updated_at"] = time.time()
+
+        if quota and quota.get("percent", 0) >= 90 and profile:
+            _notify_storage_warning(profile, quota)
+    except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+        logger.warning("Could not verify Google Drive storage usage: %s", exc)
+        with _storage_quota_lock:
+            _storage_quota_cache["value"] = None
+            _storage_quota_cache["updated_at"] = time.time()
+    except Exception:
+        logger.exception("Unexpected error while refreshing Google Drive storage usage.")
+        with _storage_quota_lock:
+            _storage_quota_cache["value"] = None
+            _storage_quota_cache["updated_at"] = time.time()
+    finally:
+        with _storage_quota_lock:
+            _storage_quota_cache["refreshing"] = False
+        close_old_connections()
+
+
+def _notify_storage_warning(profile, quota: dict) -> None:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from organizer.models import Notification
+
+    title = "Google Drive storage is almost full"
+    if Notification.objects.filter(
+        profile=profile,
+        title=title,
+        created_at__gte=timezone.now() - timedelta(hours=24),
+    ).exists():
+        return
+
+    used_percent = quota["percent"]
+    if used_percent >= 100:
+        message = "Drive is full. Free space, then retry the pending Orch backups."
+    else:
+        message = (
+            f"Drive storage is {used_percent}% used. Free space before pending "
+            "Orch backups need attention."
+        )
+    from . import notifications
+
+    notifications.notify(title, message, urgency="critical", profile=profile)
+
+
+def storage_quota_snapshot(profile=None) -> dict | None:
+    """Return cached Drive usage and refresh it off the dashboard request path."""
+    if not is_connected():
+        return None
+
+    with _storage_quota_lock:
+        stale = time.time() - _storage_quota_cache["updated_at"] >= _STORAGE_QUOTA_TTL
+        if stale and not _storage_quota_cache["refreshing"]:
+            _storage_quota_cache["refreshing"] = True
+            threading.Thread(
+                target=_refresh_storage_quota,
+                args=(profile,),
+                daemon=True,
+                name="drive-storage-quota",
+            ).start()
+        return _storage_quota_cache["value"]
 
 
 # ---------------------------------------------------------------------------

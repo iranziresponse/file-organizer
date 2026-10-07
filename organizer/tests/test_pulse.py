@@ -238,3 +238,5 @@ class ActivityStreamTests(SandboxedPathsTestCase):
             )
 
         self.assertEqual(len(pulse.get_activity_stream(self.profile, limit=10)), 10)
+        self.assertEqual(len(pulse.get_activity_stream(self.profile, limit=100)), 10)
+        self.assertEqual(len(pulse.get_activity_stream(self.profile)), 10)

@@ -107,6 +107,42 @@ class ParseExamTableTests(SimpleTestCase):
         self.assertIn("Week 1", rows[0]["date_label"])
 
 
+class TimetableNewItemNotificationTests(SandboxedPathsTestCase):
+    @mock.patch.object(ts, "fetch_timetable_html", return_value=(TEACHING_HTML, None))
+    def test_full_replace_sync_notifies_only_for_new_sessions(self, _fetch):
+        profile = self.make_profile()
+        connection = IntegrationConnection.objects.create(
+            profile=profile,
+            provider="mak_timetable",
+            display_name="Makerere Timetable",
+            config={
+                "academic_year_id": "1",
+                "academic_year_label": "2025/2026",
+                "semester_id": "1",
+                "college": "COCIS",
+                "group": "SE-2",
+            },
+        )
+
+        first_total, first_error = ts.sync_group_timetable(
+            profile, connection, kinds=("teaching",)
+        )
+        second_total, second_error = ts.sync_group_timetable(
+            profile, connection, kinds=("teaching",)
+        )
+
+        self.assertIsNone(first_error)
+        self.assertIsNone(second_error)
+        self.assertEqual(first_total, 2)
+        self.assertEqual(second_total, 2)
+        self.assertEqual(
+            Notification.objects.filter(
+                profile=profile, title="New timetable sessions"
+            ).count(),
+            1,
+        )
+
+
 class SplitCourseTests(SimpleTestCase):
     def test_splits_code_and_name(self):
         self.assertEqual(

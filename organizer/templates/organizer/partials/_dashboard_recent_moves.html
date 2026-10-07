@@ -13,9 +13,9 @@ rows shown at rest is smaller. Behaviour lives in dashboard-moves.js.
         </div>
         <div class="inline-actions-start">
             <span class="meta-token" id="recent-moves-total" data-tabular>{{ page_obj.paginator.count }} total</span>
-            <a class="button button-ghost" href="{% url 'undo_recent' %}">View all</a>
+            <a class="button button-ghost" href="{% url 'move_history' %}">View history</a>
             {% if page_obj.paginator.count %}
-            <form method="post" action="{% url 'move_clear_history' %}" class="inline-form" data-confirm="Clear the entire Recent Moves history? This also removes the ability to undo those moves and cannot be undone.">
+            <form method="post" action="{% url 'move_clear_history' %}" class="inline-form" data-confirm="Clear the entire Recent Moves history? Files stay where they are, but undo information and attached summaries will be removed. This cannot be undone.">
                 {% csrf_token %}
                 <button type="submit" class="button-ghost button-danger-soft">Clear all</button>
             </form>

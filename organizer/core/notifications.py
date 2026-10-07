@@ -257,5 +257,42 @@ def notify_file_sorted(filename: str, method: str, destination: str, profile=Non
     notify(label, f"{filename} → {drive}\\...\\{dest_path.parent.name}", urgency="low", profile=profile)
 
 
+def notify_new_items(title: str, source: str, count: int, profile=None) -> None:
+    """Send one native toast for a batch of newly synced items, not one per row."""
+    if count < 1:
+        return
+    noun = "item" if count == 1 else "items"
+    verb = "is" if count == 1 else "are"
+    notify(
+        title,
+        f"{count} new {source} {noun} {verb} ready in Orch.",
+        urgency="normal",
+        profile=profile,
+    )
+
+
+def notify_drive_backup_attention(profile) -> None:
+    """Rate-limit backup failure alerts while preserving each failure in move history."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from organizer.models import Notification
+
+    title = "Google Drive backup needs attention"
+    if Notification.objects.filter(
+        profile=profile,
+        title=title,
+        created_at__gte=timezone.now() - timedelta(minutes=30),
+    ).exists():
+        return
+    notify(
+        title,
+        "An Orch backup did not reach Drive. Check your connection or available space, then retry.",
+        urgency="critical",
+        profile=profile,
+    )
+
+
 # Import Path here to avoid circular imports at module level
 from pathlib import Path  # noqa: E402

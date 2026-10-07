@@ -19,6 +19,59 @@ from .server import dashboard_url
 # since there's a brief gap between the window appearing and the page's
 # own CSS painting.
 PAGE_BACKGROUND = "#F0F2F5"
+STARTUP_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orch</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body {
+      align-items: center;
+      background: #f0f2f5;
+      color: #19212b;
+      display: flex;
+      height: 100vh;
+      justify-content: center;
+      margin: 0;
+    }
+    main { align-items: center; display: flex; flex-direction: column; gap: 14px; }
+    .mark {
+      align-items: center;
+      background: #176b55;
+      border-radius: 18px;
+      color: white;
+      display: flex;
+      font-size: 27px;
+      font-weight: 700;
+      height: 58px;
+      justify-content: center;
+      letter-spacing: -1px;
+      width: 58px;
+    }
+    p { color: #687482; font-size: 14px; margin: 0; }
+    .spinner {
+      animation: spin 0.9s linear infinite;
+      border: 2px solid #d5dedb;
+      border-radius: 50%;
+      border-top-color: #176b55;
+      height: 16px;
+      margin-top: 6px;
+      width: 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <main aria-label="Orch is starting">
+    <div class="mark" aria-hidden="true">O</div>
+    <p>Opening your workspace</p>
+    <div class="spinner" aria-hidden="true"></div>
+  </main>
+</body>
+</html>"""
 
 
 class _JSApi:
@@ -98,22 +151,17 @@ class OrchMainWindow:
     def __init__(self, watcher_controller=None):
         self.watcher = watcher_controller
         self.is_fullscreen = False
-        self._show_after_load = False
-        # No initial url: the dashboard server may not have finished binding
-        # its socket yet when this window is created (see gui/app.py's
-        # startup sequence), and loading before it's ready would show a
-        # connection-refused page for an instant. app.py loads the real URL
-        # once it has confirmed the server actually answers.
+        self._startup_splash_pending = True
         width, height, x, y = self._sized_and_centered_for_screen(1280, 820)
         self.window = webview.create_window(
-            "Orch Loading",
+            "Orch",
+            html=STARTUP_HTML,
             width=width,
             height=height,
             x=x,
             y=y,
             min_size=(640, 460),
             background_color=PAGE_BACKGROUND,
-            hidden=True,
             frameless=True,
             resizable=True,
             easy_drag=False,
@@ -143,33 +191,14 @@ class OrchMainWindow:
             pass
 
     def _on_loaded(self):
-        # The same WebView2 compositor-desync glitch schedule_repaint_nudge()
-        # already works around for minimize/maximize/restore/fullscreen (see
-        # its own docstring) also hits the very first paint: the window is
-        # created hidden, gui/app.py navigates it to desktop-shell/ while
-        # it's still hidden, and only shows it afterward -- so the swap
-        # chain's first real content lands while there's no visible frame
-        # to have already resynced against. Confirmed by direct testing
-        # (CDP-inspecting the live page: the DOM and computed CSS are
-        # already correct -- data-theme, colors, button positions all
-        # match the intended light theme -- so this is a stale composited
-        # frame, not a template/CSS bug). The custom titlebar renders as a
-        # flat, dark, button-less strip until something forces a resize,
-        # and this event -- pywebview's own "the page finished loading"
-        # signal -- is the first reliable point after real content exists
-        # to do that.
-        self.schedule_repaint_nudge()
-        if self._show_after_load:
-            self._show_after_load = False
+        if self._startup_splash_pending:
+            self._startup_splash_pending = False
             self.window.title = "Orch"
-            self.show()
+            self.window.load_url(dashboard_url() + "desktop-shell/")
+            return
+        self.schedule_repaint_nudge()
 
     def show(self):
-        # A freshly launched WebView can otherwise expose its empty native
-        # surface while the dashboard is still loading. Defer startup and
-        # tray show requests until the first real page has finished loading.
-        if self._show_after_load:
-            return
         self._clamp_to_screen()
         self.window.show()
         try:
@@ -278,7 +307,7 @@ class OrchMainWindow:
         except Exception:
             return False
 
-    def schedule_repaint_nudge(self):
+    def schedule_repaint_nudge(self, after=None):
         """WebView2's compositor can lose sync with the window's actual
         size after a WindowState change (minimize/maximize/restore/
         fullscreen), leaving the page rendered as a blank frame -- this is
@@ -291,14 +320,16 @@ class OrchMainWindow:
         back -- imperceptible to the user, but enough to force WebView2 to
         resync, instead of leaving them staring at a blank window."""
         if sys.platform != "win32":
+            if after:
+                after()
             return
 
         def _nudge():
-            time.sleep(0.2)
-            hwnd = self._native_hwnd()
-            if not hwnd:
-                return
             try:
+                time.sleep(0.2)
+                hwnd = self._native_hwnd()
+                if not hwnd:
+                    return
                 import ctypes
                 from ctypes import wintypes
 
@@ -307,11 +338,14 @@ class OrchMainWindow:
                 width = rect.right - rect.left
                 height = rect.bottom - rect.top
                 if width <= 0 or height <= 0:
-                    return  # minimized -- nothing visible to repaint yet
+                    return
                 ctypes.windll.user32.MoveWindow(hwnd, rect.left, rect.top, width + 1, height, True)
                 ctypes.windll.user32.MoveWindow(hwnd, rect.left, rect.top, width, height, True)
             except Exception:
                 pass
+            finally:
+                if after:
+                    after()
 
         threading.Thread(target=_nudge, daemon=True).start()
 
@@ -356,19 +390,9 @@ class OrchMainWindow:
                 continue
         return None
 
-    def open_path(self, path="", show_after_load=False):
-        """Navigate the embedded view to a specific dashboard path, e.g.
-        "study/" or "profiles/new/" -- used by the tray menu. Set
-        show_after_load for the initial desktop launch so the native window
-        stays hidden until the dashboard has rendered."""
-        if show_after_load:
-            self._show_after_load = True
-        try:
-            self.window.load_url(dashboard_url() + path)
-        except Exception:
-            if show_after_load:
-                self._show_after_load = False
-            raise
+    def open_path(self, path=""):
+        """Navigate the embedded view to a dashboard path such as "study/"."""
+        self.window.load_url(dashboard_url() + path)
 
     def _on_closing(self):
         # Returning False cancels the close; hide instead so the tray icon

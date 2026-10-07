@@ -23,7 +23,7 @@
         return;
     }
 
-    var MAX_ROWS = 30;
+    var MAX_ROWS = 10;
     var ANNOUNCE_THROTTLE_MS = 30000;
     var announceKey = list.getAttribute('data-announce-key') || 'orch-activity-announce';
 

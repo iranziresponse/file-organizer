@@ -282,6 +282,14 @@ def pulse_data(request):
     profile = Profile.get_active()
     payload = pulse_core.get_snapshot(profile)
     payload["activity"], payload["activity_error"] = pulse_core.get_activity_stream_json_with_status(profile)
+    payload["controller_unread_count"] = Notification.objects.filter(
+        Q(profile=profile) | Q(profile__isnull=True), read_at__isnull=True
+    ).count() if profile else 0
+    payload["controller"] = _workspace_controller(
+        profile,
+        pulse_snapshot=payload,
+        unread_count=payload["controller_unread_count"],
+    )
     return JsonResponse(payload)
 
 
@@ -962,7 +970,7 @@ def _dashboard_priority_cards(profile, service_mesh, pending_inbox_count):
     ]
 
 
-def _cockpit_context(request, profile, events, last_move):
+def _cockpit_context(request, profile, events, last_move, controller_pulse=None):
     now, start, end = _today_window()
     next_class = _next_class(profile, now)
     app_status_items = _app_status(profile, last_move)
@@ -970,6 +978,9 @@ def _cockpit_context(request, profile, events, last_move):
     next_action = _next_best_action(profile, now, start, end)
     pending_inbox_count = SortDecision.objects.filter(profile=profile, status="pending").count() if profile else 0
     service_mesh = _service_mesh_context(profile, app_status_items, pending_decisions=pending_inbox_count)
+    controller_unread_count = Notification.objects.filter(
+        Q(profile=profile) | Q(profile__isnull=True), read_at__isnull=True
+    ).count() if profile and controller_pulse is not None else 0
 
     now_strip = [
         {
@@ -1002,11 +1013,172 @@ def _cockpit_context(request, profile, events, last_move):
         "app_status_items": app_status_items,
         "health_items": app_status_items,
         "service_mesh": service_mesh,
+        "controller_items": _workspace_controller(
+            profile,
+            now,
+            pulse_snapshot=controller_pulse,
+            unread_count=controller_unread_count,
+        ) if controller_pulse is not None else [],
+        "controller_unread_count": controller_unread_count,
         "priority_cards": _dashboard_priority_cards(profile, service_mesh, pending_inbox_count),
         "next_class": next_class,
         "command_items": _command_items(profile, next_action),
         **_focus_context(profile),
     }
+
+
+def _workspace_controller(profile, now=None, pulse_snapshot=None, unread_count=None):
+    """Build the live, data-backed action cards for the workspace dashboard."""
+    if not profile:
+        return []
+
+    from ..core import drive_api
+
+    now = now or timezone.localtime()
+    items = []
+
+    pulse_snapshot = pulse_snapshot or pulse_core.get_snapshot(profile)
+    lecture = pulse_snapshot.get("lecture")
+    if lecture:
+        minutes = lecture.get("minutes_until")
+        if lecture["state"] == "active":
+            timing = "In progress"
+        elif minutes is not None:
+            timing = "Starts in about an hour" if 45 <= minutes <= 75 else (
+                f"Starts in {minutes} min" if minutes < 60 else "Later today"
+            )
+        else:
+            timing = lecture.get("detail") or "In progress"
+        items.append({
+            "kind": "schedule",
+            "title": "Next lesson" if lecture["state"] != "active" else "Lesson in progress",
+            "detail": f"{lecture['label']} · {timing}",
+            "url": lecture["url"],
+            "action": "Open timetable",
+            "state": lecture["state"],
+        })
+
+    due = pulse_snapshot.get("deadline")
+    if due:
+        due_at = parse_datetime(due["due_at"]) if due.get("due_at") else None
+        items.append({
+            "kind": "deadline",
+            "title": due.get("title") or due["label"],
+            "detail": (
+                f"{due.get('subject_code') or 'Assignment'} · due {_short_timesince_future(due_at, now)}"
+                if due_at else due["label"]
+            ),
+            "url": due["url"],
+            "action": "Review deadline",
+            "state": "warning" if due_at and due_at <= now + timedelta(hours=24) else "live",
+        })
+
+    pending_files = SortDecision.objects.filter(profile=profile, status="pending").count()
+    if pending_files:
+        items.append({
+            "kind": "files",
+            "title": f"{pending_files} file{'s' if pending_files != 1 else ''} need a decision",
+            "detail": "Orch is waiting for your approval before moving these files.",
+            "url": reverse("sorting_inbox"),
+            "action": "Review files",
+            "state": "warning",
+        })
+
+    queued_reviews = pulse_snapshot.get("needs_you")
+    if queued_reviews:
+        items.append({
+            "kind": "review",
+            "title": f"{queued_reviews['count']} review item{'s' if queued_reviews['count'] != 1 else ''} saved",
+            "detail": "Your study follow-ups are ready when you are.",
+            "url": queued_reviews["url"],
+            "action": "Open reviews",
+            "state": "live",
+        })
+
+    recommendation = ResourceRecommendation.objects.filter(
+        profile=profile, source_type="youtube", status="suggested"
+    ).order_by("-score", "-updated_at").first()
+    if recommendation:
+        items.append({
+            "kind": "resource",
+            "title": recommendation.title,
+            "detail": f"{recommendation.subject_code or recommendation.theme} · {recommendation.reason or 'Recommended from your saved study topics'}",
+            "url": recommendation.url,
+            "action": "Open YouTube pick",
+            "state": "live",
+            "external": True,
+        })
+
+    failed_backups = MoveEvent.objects.filter(
+        profile=profile, drive_backup_status="failed"
+    ).count()
+    quota = drive_api.storage_quota_snapshot(profile)
+    if quota and quota.get("percent", 0) >= 90:
+        percent = quota["percent"]
+        items.append({
+            "kind": "storage",
+            "title": "Google Drive is full" if percent >= 100 else "Google Drive storage is low",
+            "detail": (
+                "Free Drive space, then retry the pending Orch backups."
+                if percent >= 100
+                else f"{percent}% used · {failed_backups} Orch backup{'s' if failed_backups != 1 else ''} pending"
+            ),
+            "url": reverse("connections_home"),
+            "action": "Review Drive backups",
+            "state": "warning",
+        })
+    elif failed_backups:
+        items.append({
+            "kind": "storage",
+            "title": f"{failed_backups} Drive backup{'s' if failed_backups != 1 else ''} need attention",
+            "detail": "The files are safe on this device. Check Drive connection or available space, then retry.",
+            "url": reverse("connections_home"),
+            "action": "Review and retry",
+            "state": "warning",
+        })
+
+    connection_errors = list(
+        IntegrationConnection.objects.filter(
+            Q(profile=profile) | Q(profile__isnull=True), status="error"
+        ).order_by("display_name")[:3]
+    )
+    if connection_errors:
+        labels = ", ".join(connection.display_name for connection in connection_errors)
+        items.append({
+            "kind": "connection",
+            "title": "A connected service needs attention",
+            "detail": labels,
+            "url": reverse("connections_home"),
+            "action": "Check connections",
+            "state": "warning",
+        })
+
+    if unread_count is None:
+        unread_count = Notification.objects.filter(
+            Q(profile=profile) | Q(profile__isnull=True), read_at__isnull=True
+        ).count()
+    unread = unread_count
+    if unread:
+        items.append({
+            "kind": "notifications",
+            "title": f"{unread} new notification{'s' if unread != 1 else ''}",
+            "detail": "Updates from your connected tools and Orch are collected here.",
+            "url": reverse("notifications"),
+            "action": "Open updates",
+            "state": "live",
+        })
+    return items
+
+
+def _short_timesince_future(value, now):
+    seconds = max(0, int((value - now).total_seconds()))
+    if seconds < 3600:
+        return f"in {max(1, seconds // 60)} min"
+    if seconds < 86400:
+        hours = seconds // 3600
+        return f"in {hours} hr"
+    days = seconds // 86400
+    return f"in {days} day{'s' if days != 1 else ''}"
 
 
 def _create_focus_session(request, profile):
@@ -1183,8 +1355,10 @@ def dashboard(request):
     context.update(_sorting_pulse_context(profile, events))
     context.update(_recent_moves_context(request, profile, events))
     context.update(_muele_panel_context(profile))
-    context.update(_cockpit_context(request, profile, events, last_move))
     context["pulse"] = pulse_core.get_snapshot(profile)
+    context.update(_cockpit_context(
+        request, profile, events, last_move, controller_pulse=context["pulse"]
+    ))
     context["activity_stream"], context["activity_stream_error"] = pulse_core.get_activity_stream_with_status(profile)
     return render(request, "organizer/dashboard.html", context)
 

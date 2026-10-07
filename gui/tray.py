@@ -6,6 +6,7 @@ how this is used here: the tray starts detached, then gui/app.py's main()
 calls webview.start() as the actual blocking call.
 """
 
+import logging
 import os
 import threading
 import time
@@ -23,11 +24,37 @@ from .server import dashboard_url
 from .watcher_controller import WatcherController
 
 _BUILD_DATE = "2026-07-19"
+logger = logging.getLogger("orch.tray")
 
 try:
     from organizer import __version__ as VERSION
 except (ImportError, AttributeError):
     VERSION = "1.0.0"
+
+
+def _ask_to_install_update(version):
+    message = (
+        f"Orch version {version} is ready to install.\n\n"
+        "Choose Yes to download and install it now. Orch will restart "
+        "automatically when the update is ready. Choose No to do this later."
+    )
+    if os.name == "nt":
+        import ctypes
+
+        # MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND
+        return ctypes.windll.user32.MessageBoxW(
+            None, message, "Orch update available", 0x00000004 | 0x00000020 | 0x00010000
+        ) == 6
+
+    import tkinter as tk
+    from tkinter import messagebox
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        return messagebox.askyesno("Orch update available", message, parent=root)
+    finally:
+        root.destroy()
 
 
 class OrganizerTray:
@@ -180,12 +207,12 @@ class OrganizerTray:
 
         while True:
             time.sleep(2)
-            try:
-                if has_pending():
-                    for note in pop_pending():
+            if has_pending():
+                for note in pop_pending():
+                    try:
                         self.icon.notify(note.get("message", ""), note.get("title", "Orch"))
-            except Exception:
-                pass
+                    except Exception:
+                        logger.exception("Could not deliver a queued Orch desktop notification.")
 
     # -------------------------------------------------------------- update
 
@@ -214,16 +241,32 @@ class OrganizerTray:
                 self._update_announced = True
                 version = result.get("latest_version", "")
                 self.icon.update_menu()
-                self.icon.notify(
-                    f'Version {version} is ready. Use "Update to v{version}" in the tray menu to install it.',
-                    "Orch update available",
-                )
+                threading.Thread(
+                    target=self._prompt_for_update,
+                    args=(version,),
+                    daemon=True,
+                    name="orch-update-prompt",
+                ).start()
 
             error = result.get("error")
             if error and result.get("available") and error != self._update_download_error_shown:
                 self._update_download_error_shown = error
                 self.icon.update_menu()
                 self.icon.notify(f"Couldn't finish updating: {error}", "Orch update failed")
+
+    def _prompt_for_update(self, version):
+        try:
+            accepted = _ask_to_install_update(version)
+        except Exception:
+            logger.exception("Could not show the Orch update confirmation dialog.")
+            self.icon.notify(
+                f'Version {version} is ready. Choose "Update to v{version}" from the Orch tray menu.',
+                "Orch update available",
+            )
+            return
+
+        if accepted:
+            self._start_update()
 
     def _start_update(self):
         result = updater.get_last_check()

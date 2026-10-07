@@ -235,8 +235,9 @@ def sync_recommendations(profile, subject_code=None, limit=16):
     from organizer.models import ResourceRecommendation
 
     results = []
+    created_count = 0
     for candidate in build_candidates(profile, subject_code=subject_code, limit=limit):
-        item, _ = ResourceRecommendation.objects.update_or_create(
+        item, created = ResourceRecommendation.objects.update_or_create(
             profile=profile,
             subject_code=candidate.subject_code,
             source_type=candidate.source_type,
@@ -249,7 +250,17 @@ def sync_recommendations(profile, subject_code=None, limit=16):
                 "score": candidate.score,
             },
         )
+        created_count += int(created)
         results.append(item)
+    if created_count:
+        from . import notifications
+
+        notifications.notify_new_items(
+            "New study recommendations",
+            "study recommendation",
+            created_count,
+            profile=profile,
+        )
     return results
 
 

@@ -455,10 +455,18 @@ def _backup_and_record(move_event_pk, target_path, log=None):
     if not config or not config.get("enabled"):
         return
 
+    event = MoveEvent.objects.select_related("profile").filter(pk=move_event_pk).first()
+    if not event:
+        return
+
     success = drive_api.backup_file(target_path, log=log)
-    MoveEvent.objects.filter(pk=move_event_pk).update(
+    updated = MoveEvent.objects.filter(pk=move_event_pk).update(
         drive_backup_status="success" if success else "failed"
     )
+    if updated and not success and event.profile_id:
+        from . import notifications
+
+        notifications.notify_drive_backup_attention(event.profile)
 
 
 def retry_failed_drive_backups(profile, task=None, log=None):

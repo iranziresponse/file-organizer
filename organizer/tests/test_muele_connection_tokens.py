@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from organizer.core import muele_api, muele_downloader
-from organizer.models import IntegrationConnection
+from organizer.models import AssignmentItem, IntegrationConnection, Notification
 
 from .helpers import SandboxedPathsTestCase
 
@@ -40,6 +40,29 @@ class ConnectionTokenKeyringTests(SandboxedPathsTestCase):
 
         self.assertEqual(muele_api.load_connection_token(self.connection_a), "token-for-a")
         self.assertEqual(muele_api.load_connection_token(self.connection_b), "token-for-b")
+
+    def test_assignment_notifications_only_fire_for_new_assignments(self):
+        muele_api.store_connection_token(self.connection_a, "token-for-a")
+        assignments = [{
+            "cmid": 42,
+            "name": "Build a search engine",
+            "course_name": "CSC2114",
+            "duedate": None,
+            "intro": "",
+        }]
+        with mock.patch.object(muele_api, "get_assignments", return_value=(assignments, None)):
+            self.assertEqual(muele_downloader.sync_assignments(self.profile_a), 1)
+            self.assertEqual(muele_downloader.sync_assignments(self.profile_a), 0)
+
+        self.assertEqual(
+            AssignmentItem.objects.filter(profile=self.profile_a, source="muele").count(), 1
+        )
+        self.assertEqual(
+            Notification.objects.filter(
+                profile=self.profile_a, title="New MUELE assignments"
+            ).count(),
+            1,
+        )
 
     def test_clearing_one_connections_token_does_not_touch_the_other(self):
         muele_api.store_connection_token(self.connection_a, "token-for-a")

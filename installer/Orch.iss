@@ -51,6 +51,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 Source: "..\dist\Orch\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist_installer\MicrosoftEdgeWebView2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{group}\Orch"; Filename: "{app}\{#MyAppExeName}"
@@ -58,6 +59,7 @@ Name: "{group}\Uninstall Orch"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Orch"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+Filename: "{tmp}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Checking the Microsoft Edge WebView2 runtime..."; Flags: waituntilterminated runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Orch now"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]

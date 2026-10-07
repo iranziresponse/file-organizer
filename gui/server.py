@@ -13,7 +13,8 @@ it's pure startup latency the user sits through on every launch, not a
 one-time cost.
 """
 
-import os
+import logging
+import socket
 import threading
 
 from django.contrib.staticfiles.handlers import StaticFilesHandler
@@ -24,6 +25,18 @@ DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 8765
 
 
+def _select_dashboard_port(host, preferred_port):
+    """Use the standard port when available, otherwise select a free local
+    port so an unrelated service cannot prevent Orch from opening."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((host, preferred_port))
+            return preferred_port
+        except OSError:
+            probe.bind((host, 0))
+            return probe.getsockname()[1]
+
+
 def start_dashboard_server(host=DASHBOARD_HOST, port=DASHBOARD_PORT):
     # Deliberately not in organizer.apps.OrganizerConfig.ready(): ready()
     # fires for every management command, including `manage.py test` --
@@ -31,6 +44,11 @@ def start_dashboard_server(host=DASHBOARD_HOST, port=DASHBOARD_PORT):
     # so a DB write there would land on the real db.sqlite3, not a test
     # fixture. This is the one place that's guaranteed to only run when
     # the real app is actually starting up.
+    global DASHBOARD_PORT
+
+    port = _select_dashboard_port(host, port)
+    DASHBOARD_PORT = port
+
     from organizer.core import jobs
     jobs.mark_stale_tasks_as_interrupted()
 
@@ -44,19 +62,16 @@ def start_dashboard_server(host=DASHBOARD_HOST, port=DASHBOARD_PORT):
         try:
             run_wsgi_server(host, port, handler, threading=True)
         except OSError:
-            # Most likely a second Orch instance already bound this port
-            # (e.g. the exe was launched twice). This is a daemon thread,
-            # so a silent crash here would otherwise leave the tray icon
-            # and window running against a dead server forever -- os._exit
-            # matches runserver's own handling of the same error, and is
-            # required (not sys.exit) because sys.exit doesn't work from a
-            # thread other than the main one.
-            os._exit(1)
+            logging.getLogger(__name__).exception(
+                "Orch's dashboard server failed to bind %s:%s", host, port
+            )
 
     thread = threading.Thread(target=_serve, daemon=True, name="organizer-dashboard")
     thread.start()
     return thread
 
 
-def dashboard_url(host=DASHBOARD_HOST, port=DASHBOARD_PORT):
+def dashboard_url(host=DASHBOARD_HOST, port=None):
+    if port is None:
+        port = DASHBOARD_PORT
     return f"http://{host}:{port}/"

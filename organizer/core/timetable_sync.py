@@ -350,7 +350,25 @@ def sync_group_timetable(profile, connection, kinds=("teaching", "recess", "test
         return 0, "This connection is missing its academic year, semester, college, or group."
 
     total = 0
+    new_entries = 0
     errors = []
+    signature_fields = (
+        "weekday", "specific_date", "start_time", "end_time", "course_code",
+        "course_name", "room", "lecturer", "raw_group",
+    )
+
+    def signature(row):
+        values = []
+        for field in signature_fields:
+            value = row.get(field)
+            text = str(value) if value is not None else ""
+            if field in {"start_time", "end_time"} and text:
+                text = text[:5]
+            elif field == "specific_date" and text:
+                text = text[:10]
+            values.append(text)
+        return tuple(values)
+
     for kind in kinds:
         html, error = fetch_timetable_html(academic_year_id, semester_id, kind, college, group)
         if error:
@@ -362,6 +380,13 @@ def sync_group_timetable(profile, connection, kinds=("teaching", "recess", "test
         else:
             rows = parse_exam_table(html, group, academic_year_label)
 
+        existing = {
+            signature(row)
+            for row in TimetableEntry.objects.filter(
+                profile=profile, connection=connection, kind=kind
+            ).values(*signature_fields)
+        }
+        new_entries += sum(1 for row in rows if signature(row) not in existing)
         TimetableEntry.objects.filter(profile=profile, connection=connection, kind=kind).delete()
         TimetableEntry.objects.bulk_create([
             TimetableEntry(profile=profile, connection=connection, kind=kind, **row)
@@ -379,5 +404,15 @@ def sync_group_timetable(profile, connection, kinds=("teaching", "recess", "test
         from django.utils import timezone
         connection.last_sync_at = timezone.now()
     connection.save(update_fields=["status", "last_sync_at"])
+
+    if new_entries:
+        from . import notifications
+
+        notifications.notify_new_items(
+            "New timetable sessions",
+            "timetable",
+            new_entries,
+            profile=profile,
+        )
 
     return total, "; ".join(errors) if errors else None

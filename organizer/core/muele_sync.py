@@ -172,6 +172,16 @@ def sync_assignments_from_muele(profile, token: str | None = None, log: Callable
         else:
             result["updated"] += 1
 
+    if result["created"]:
+        from . import notifications
+
+        notifications.notify_new_items(
+            "New MUELE assignments",
+            "MUELE assignment",
+            result["created"],
+            profile=profile,
+        )
+
     if log:
         log(f"Assignment sync: {result['created']} created, {result['updated']} updated")
 

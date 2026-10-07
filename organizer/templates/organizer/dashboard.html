@@ -45,6 +45,8 @@
     </section>
     {% else %}
 
+    {% include "organizer/partials/_dashboard_controller.html" %}
+
     {# Tier 1: live strip #}
     {% include "organizer/partials/_dashboard_live_strip.html" %}
 
@@ -71,6 +73,6 @@
 {% block extra_js %}
 <script src="{% static 'organizer/js/dashboard-disclosure.js' %}?v={{ ORCH_STATIC_VERSION }}"></script>
 <script src="{% static 'organizer/js/activity-film.js' %}?v={{ ORCH_STATIC_VERSION }}"></script>
-<script src="{% static 'organizer/js/dashboard-pulse.js' %}?v={{ ORCH_STATIC_VERSION }}-live-2"></script>
+<script src="{% static 'organizer/js/dashboard-pulse.js' %}?v={{ ORCH_STATIC_VERSION }}-live-3"></script>
 <script src="{% static 'organizer/js/dashboard-moves.js' %}?v={{ ORCH_STATIC_VERSION }}"></script>
 {% endblock %}

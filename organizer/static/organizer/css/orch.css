@@ -678,6 +678,239 @@ table tbody tr:hover {
     color: var(--orch-lime);
 }
 
+/* Shared app controls use one clear hierarchy: filled primary, quiet
+   outlined secondary, and unmistakable destructive actions. */
+.app-shell .button,
+.app-shell button:not(.theme-toggle):not(.guide-btn):not(.support-topbar-btn):not(.support-fab):not(.guide-close):not(.search-clear):not(.pulse-refresh) {
+    min-height: 40px;
+    border-radius: 10px !important;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    transition:
+        color 140ms ease,
+        background-color 140ms ease,
+        border-color 140ms ease,
+        box-shadow 140ms ease,
+        transform 100ms ease;
+}
+
+.app-shell .button:not(.button-live):not(.button-ghost):not(.button-danger):not(.button-danger-soft),
+.app-shell button:not(.theme-toggle):not(.guide-btn):not(.support-topbar-btn):not(.support-fab):not(.guide-close):not(.search-clear):not(.pulse-refresh):not(.button-live):not(.button-ghost):not(.button-danger):not(.button-danger-soft) {
+    border-color: var(--orch-line) !important;
+    background: var(--orch-surface-raised);
+    color: var(--orch-ink);
+}
+
+.app-shell .button:not(.button-live):not(.button-danger):not(.button-danger-soft):hover,
+.app-shell button:not(.theme-toggle):not(.guide-btn):not(.support-topbar-btn):not(.support-fab):not(.guide-close):not(.search-clear):not(.pulse-refresh):not(.button-live):not(.button-danger):not(.button-danger-soft):hover {
+    border-color: var(--orch-green) !important;
+    background: var(--orch-surface);
+    color: var(--orch-ink);
+    box-shadow: 0 4px 12px rgba(38, 122, 69, 0.1) !important;
+}
+
+.app-shell .button:active,
+.app-shell button:not(.theme-toggle):not(.guide-btn):not(.support-topbar-btn):not(.support-fab):not(.guide-close):not(.search-clear):not(.pulse-refresh):active {
+    transform: translateY(1px);
+}
+
+.app-shell .button-ghost,
+.app-shell button.button-ghost,
+.app-shell .ghost-button {
+    background: transparent !important;
+}
+
+.app-shell .button-danger,
+.app-shell button.button-danger {
+    border-color: var(--danger-border) !important;
+    background: var(--danger-bg) !important;
+    color: var(--danger-text) !important;
+}
+
+.app-shell .button-danger:hover,
+.app-shell button.button-danger:hover {
+    border-color: var(--danger-text) !important;
+    background: var(--danger-bg) !important;
+}
+
+.app-shell .button-compact,
+.app-shell button.button-compact {
+    min-height: 34px;
+    height: 34px;
+    padding: 6px 11px;
+    font-size: 12px;
+}
+
+.app-shell button:disabled,
+.app-shell .button[aria-disabled="true"],
+.app-shell button[aria-busy="true"] {
+    cursor: not-allowed;
+    opacity: 0.62;
+    box-shadow: none !important;
+    transform: none;
+}
+
+.app-shell button[aria-busy="true"] {
+    cursor: progress;
+}
+
+.app-shell .button:focus-visible,
+.app-shell button:focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 3px;
+}
+
+.app-shell .card:focus-within,
+.app-shell .connection-card:focus-within {
+    border-color: var(--orch-green) !important;
+}
+
+.workspace-controller {
+    gap: 14px;
+    padding: 18px;
+    border: 1px solid var(--orch-line);
+    border-radius: 18px;
+    background:
+        radial-gradient(ellipse at 0 0, rgba(105, 199, 121, 0.08), transparent 38%),
+        var(--orch-surface);
+}
+
+.workspace-controller__heading h2 {
+    font-size: clamp(20px, 2vw, 24px);
+    letter-spacing: -0.04em;
+}
+
+.workspace-controller__inbox {
+    min-height: 38px;
+    padding: 7px 11px;
+    border: 1px solid var(--orch-line);
+    border-radius: 10px;
+    color: var(--orch-ink);
+    transition: border-color 140ms ease, background 140ms ease;
+}
+
+.workspace-controller__inbox:hover {
+    border-color: var(--orch-green);
+    background: var(--orch-surface-raised);
+    color: var(--orch-ink);
+}
+
+.workspace-controller__card {
+    min-height: 158px;
+    gap: 9px;
+    padding: 16px;
+    border-radius: 14px;
+    box-shadow: none;
+    transition: border-color 150ms ease, background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.workspace-controller__card:hover,
+.workspace-controller__card:focus-visible {
+    transform: translateY(-2px);
+    border-color: var(--orch-green) !important;
+    background: var(--orch-surface-raised);
+    box-shadow: var(--orch-shadow-hover);
+}
+
+.workspace-controller__card.is-warning {
+    border-left: 3px solid var(--warning-text);
+}
+
+.workspace-controller__top {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 9px;
+}
+
+.workspace-controller__icon {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    place-items: center;
+    border: 1px solid var(--green-border);
+    border-radius: 10px;
+    background: var(--green-soft);
+    color: var(--orch-green);
+}
+
+.workspace-controller__icon svg {
+    width: 18px;
+    height: 18px;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.workspace-controller__kind {
+    color: var(--orch-muted);
+    font-size: 11px;
+    letter-spacing: 0.09em;
+}
+
+.workspace-controller__status {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--orch-green);
+}
+
+.workspace-controller__card.is-warning .workspace-controller__status {
+    background: var(--warning-text);
+}
+
+.workspace-controller__card strong {
+    font-size: 14px;
+}
+
+.workspace-controller__detail {
+    color: var(--orch-muted);
+}
+
+.workspace-controller__action {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--orch-green);
+    transition: gap 150ms ease;
+}
+
+.workspace-controller__action::after {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-top: 1.5px solid currentColor;
+    border-right: 1.5px solid currentColor;
+    transform: rotate(45deg);
+}
+
+.workspace-controller__card:hover .workspace-controller__action,
+.workspace-controller__card:focus-visible .workspace-controller__action {
+    gap: 12px;
+}
+
+.focus-card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 9px;
+}
+
+.focus-card__actions form {
+    margin: 0;
+}
+
+.focus-card__actions .button {
+    min-height: 40px;
+    padding-inline: 15px;
+}
+
 button:focus-visible,
 a:focus-visible {
     outline: 2px solid var(--orch-lime);
@@ -716,6 +949,17 @@ a:focus-visible {
         font-size: 28px;
     }
 
+    .app-shell .button,
+    .app-shell button:not(.theme-toggle):not(.guide-btn):not(.support-topbar-btn):not(.support-fab):not(.guide-close):not(.search-clear):not(.pulse-refresh) {
+        min-height: 42px;
+    }
+
+    .app-shell .button-compact,
+    .app-shell button.button-compact {
+        min-height: 38px;
+        height: 38px;
+    }
+
     .app-shell .card,
     .app-shell .compact-card {
         padding: 17px;
@@ -731,6 +975,20 @@ a:focus-visible {
         width: auto;
         min-width: 0;
         justify-content: flex-end;
+    }
+
+    .workspace-controller {
+        padding: 14px;
+    }
+
+    .workspace-controller__heading {
+        align-items: flex-start;
+    }
+
+    .workspace-controller__inbox {
+        min-height: 36px;
+        padding: 6px 9px;
+        margin-left: 0;
     }
 
     html:not(.power-rail-active) .topbar.app-roof .topbar-power {

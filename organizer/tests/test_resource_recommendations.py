@@ -4,7 +4,14 @@ from django.urls import reverse
 from django.db import IntegrityError, transaction
 
 from organizer.core import resources
-from organizer.models import CourseConfig, MoveEvent, ResourceRecommendation, SubjectMemory, SubjectTheme
+from organizer.models import (
+    CourseConfig,
+    MoveEvent,
+    Notification,
+    ResourceRecommendation,
+    SubjectMemory,
+    SubjectTheme,
+)
 
 from .helpers import SandboxedPathsTestCase
 
@@ -142,6 +149,7 @@ class ResourceRecommendationEngineTests(SandboxedPathsTestCase):
                  "url": "https://www.youtube.com/watch?v=bbb", "thumbnail_url": ""},
             ]
             resources.sync_recommendations(self.profile, limit=8)
+            resources.sync_recommendations(self.profile, limit=8)
 
         titles = set(
             ResourceRecommendation.objects.filter(profile=self.profile, source_type="youtube")
@@ -149,6 +157,12 @@ class ResourceRecommendationEngineTests(SandboxedPathsTestCase):
         )
         self.assertIn("Video A", titles)
         self.assertIn("Video B", titles)
+        self.assertEqual(
+            Notification.objects.filter(
+                profile=self.profile, title="New study recommendations"
+            ).count(),
+            1,
+        )
 
     def test_weak_areas_rank_above_general_themes(self):
         candidates = resources.build_candidates(self.profile, limit=4)

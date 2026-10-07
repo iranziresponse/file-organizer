@@ -1,0 +1,103 @@
+{% extends "organizer/base.html" %}
+
+{% block title %}Move history - Orch{% endblock %}
+
+{% block content %}
+<div class="page-stack page-center page-wide">
+    <section class="page-heading">
+        <div>
+            <span class="eyebrow">{{ profile.name }}</span>
+            <h2>Move history</h2>
+            <p>Browse file actions in small pages. Clearing records never moves or deletes your files.</p>
+        </div>
+        <a class="button button-ghost" href="{% url 'dashboard' %}">Back to dashboard</a>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <div>
+                <h2>File actions</h2>
+                <p class="card-subtitle">
+                    {{ page_obj.paginator.count }} records · page {{ page_obj.number }} of {{ page_obj.paginator.num_pages|default:1 }}
+                </p>
+            </div>
+            {% if page_obj.paginator.count %}
+            <form method="post" action="{% url 'move_clear_history' %}" class="inline-form"
+                  data-confirm="Permanently clear all {{ page_obj.paginator.count }} move records for this profile? Files will stay where they are, but undo information and attached summaries will be removed. This cannot be undone.">
+                {% csrf_token %}
+                <input type="hidden" name="return_to" value="history">
+                <button type="submit" class="button-ghost button-danger-soft">Clear move history</button>
+            </form>
+            {% endif %}
+        </div>
+
+        {% if page_obj.object_list %}
+        <div class="table-shell">
+            <table class="recent-moves-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Time</th>
+                        <th scope="col">File</th>
+                        <th scope="col">Destination</th>
+                        <th scope="col">Method</th>
+                        <th scope="col">Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in page_obj.object_list %}
+                    <tr class="recent-move-row">
+                        <td data-label="Time">{{ event.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        <td data-label="File">{{ event.filename }}</td>
+                        <td data-label="Destination" class="path-text">{{ event.destination_path|default:"Unavailable" }}</td>
+                        <td data-label="Method">{{ event.get_method_display }}</td>
+                        <td data-label="Result">
+                            {% if event.success %}
+                            <span class="status-dot is-live">Sorted</span>
+                            {% else %}
+                            <span class="status-dot is-error">Failed</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if page_obj.has_other_pages %}
+        <nav class="pagination" aria-label="Move history pages">
+            <span class="step-links">
+                {% if page_obj.has_previous %}
+                <a class="button-ghost" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+                {% endif %}
+                <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+                {% if page_obj.has_next %}
+                <a class="button-ghost" href="?page={{ page_obj.next_page_number }}">Next</a>
+                {% endif %}
+            </span>
+        </nav>
+        {% endif %}
+        {% else %}
+        <div class="empty-state">
+            <div>
+                <h3>No move history yet</h3>
+                <p>New file actions will appear here, with no more than 50 records loaded on each page.</p>
+            </div>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="card compact-card">
+        <div class="card-header">
+            <div>
+                <h2>Reclaim database space</h2>
+                <p class="card-subtitle">After clearing old records, SQLite can compact the database file and return unused space to your device.</p>
+            </div>
+            <form method="post" action="{% url 'move_history_compact' %}" class="inline-form"
+                  data-confirm="Compact Orch's local database now? This may take a moment. Your remaining data will not be deleted.">
+                {% csrf_token %}
+                <button type="submit" class="button button-ghost">Compact database</button>
+            </form>
+        </div>
+    </section>
+</div>
+{% endblock %}
